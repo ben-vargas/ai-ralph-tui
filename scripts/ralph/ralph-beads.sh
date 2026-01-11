@@ -231,7 +231,8 @@ echo "Starting Ralph (Beads + $AGENT_CLI)"
 
 # Flush database to JSONL at startup to ensure bv sees current state
 # (issues.jsonl is git-tracked but database is not, so they can drift after branch switches)
-bd sync --flush-only 2>/dev/null || true
+# Use --no-daemon to bypass daemon caching and write directly
+bd sync --flush-only --no-daemon 2>/dev/null || true
 echo ""
 
 # Get the epic we're working on
@@ -363,7 +364,8 @@ EOF
         echo ""
         echo "✓ Bead $BEAD_ID closed"
         # Flush database to JSONL so bv sees the change
-        bd sync --flush-only 2>/dev/null || true
+        # Use --no-daemon to bypass daemon caching
+        bd sync --flush-only --no-daemon 2>/dev/null || true
     else
         echo ""
         echo "Note: Bead $BEAD_ID still open (agent may need more time)"
