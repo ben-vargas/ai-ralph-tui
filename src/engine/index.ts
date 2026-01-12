@@ -8,6 +8,7 @@ import type {
   ActiveAgentState,
   ActiveAgentReason,
   AgentSwitchedEvent,
+  AllAgentsLimitedEvent,
   EngineEvent,
   EngineEventListener,
   EngineState,
@@ -99,6 +100,8 @@ export class ExecutionEngine {
   private rateLimitRetryMap: Map<string, number> = new Map();
   /** Rate limit handling configuration */
   private rateLimitConfig: Required<RateLimitHandlingConfig>;
+  /** Track agents that have been rate-limited for the current task (cleared on task completion) */
+  private rateLimitedAgents: Set<string> = new Set();
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -757,8 +760,35 @@ export class ExecutionEngine {
           return this.runIteration(task);
         }
 
-        // Max retries exceeded - return as failed with rate limit error
-        // This will trigger fallback agent handling if configured
+        // Max retries exceeded for current agent - try fallback agent
+        const currentAgentPlugin = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
+        this.rateLimitedAgents.add(currentAgentPlugin);
+
+        // Try to switch to fallback agent
+        const fallbackResult = await this.tryFallbackAgent(task, iteration, startedAt);
+        if (fallbackResult.switched) {
+          // Successfully switched to fallback - retry the iteration with new agent
+          this.state.currentIteration--;
+          return this.runIteration(task);
+        }
+
+        // No fallback available - all agents are rate limited
+        if (fallbackResult.allAgentsLimited) {
+          // Emit allAgentsLimited event and pause execution
+          const allLimitedEvent: AllAgentsLimitedEvent = {
+            type: 'agent:all-limited',
+            timestamp: new Date().toISOString(),
+            task,
+            triedAgents: Array.from(this.rateLimitedAgents),
+            rateLimitState: this.state.rateLimitState!,
+          };
+          this.emit(allLimitedEvent);
+
+          // Pause the engine - user intervention required
+          this.pause();
+        }
+
+        // Return as failed with rate limit error
         const endedAt = new Date();
         return {
           iteration,
@@ -795,6 +825,10 @@ export class ExecutionEngine {
           task,
           iteration,
         });
+
+        // Clear rate-limited agents tracking on task completion
+        // This allows agents to be retried for the next task
+        this.clearRateLimitedAgents();
       }
 
       // Determine iteration status
@@ -1174,6 +1208,105 @@ export class ExecutionEngine {
   }
 
   /**
+   * Get the next available fallback agent that hasn't been rate-limited.
+   * Returns undefined if no fallback agents are configured or all are rate-limited.
+   */
+  private getNextFallbackAgent(): string | undefined {
+    const fallbackAgents = this.config.agent.fallbackAgents;
+    if (!fallbackAgents || fallbackAgents.length === 0) {
+      return undefined;
+    }
+
+    // Find the first fallback that hasn't been rate-limited
+    for (const fallbackPlugin of fallbackAgents) {
+      if (!this.rateLimitedAgents.has(fallbackPlugin)) {
+        return fallbackPlugin;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Try to switch to a fallback agent after rate limit exhaustion.
+   * Initializes the fallback agent with the same config/options as primary.
+   *
+   * @param task - Current task being processed
+   * @param iteration - Current iteration number
+   * @param startedAt - When the iteration started
+   * @returns Object indicating whether switch occurred and if all agents are limited
+   */
+  private async tryFallbackAgent(
+    task: TrackerTask,
+    iteration: number,
+    startedAt: Date
+  ): Promise<{ switched: boolean; allAgentsLimited: boolean }> {
+    const nextFallback = this.getNextFallbackAgent();
+
+    if (!nextFallback) {
+      // No more fallback agents available
+      return { switched: false, allAgentsLimited: true };
+    }
+
+    try {
+      // Create agent config for fallback - inherit options from primary
+      const fallbackConfig = {
+        name: nextFallback,
+        plugin: nextFallback,
+        options: { ...this.config.agent.options },
+        command: this.config.agent.command,
+        defaultFlags: this.config.agent.defaultFlags,
+        timeout: this.config.agent.timeout,
+      };
+
+      // Get fallback agent instance from registry
+      const agentRegistry = getAgentRegistry();
+      const fallbackInstance = await agentRegistry.getInstance(fallbackConfig);
+
+      // Verify fallback agent is available
+      const detectResult = await fallbackInstance.detect();
+      if (!detectResult.available) {
+        // Fallback not available - mark as limited and try next
+        console.log(
+          `[fallback] Agent '${nextFallback}' not available: ${detectResult.error}`
+        );
+        this.rateLimitedAgents.add(nextFallback);
+        return this.tryFallbackAgent(task, iteration, startedAt);
+      }
+
+      // Switch to fallback agent
+      this.agent = fallbackInstance;
+      this.switchToFallbackAgent(nextFallback);
+
+      // Clear rate limit retry count for the task since we're switching agents
+      this.clearRateLimitRetryCount(task.id);
+
+      console.log(
+        `[fallback] Switched from '${this.config.agent.plugin}' to '${nextFallback}'`
+      );
+
+      return { switched: true, allAgentsLimited: false };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(
+        `[fallback] Failed to initialize fallback agent '${nextFallback}': ${errorMessage}`
+      );
+
+      // Mark this fallback as unavailable and try the next one
+      this.rateLimitedAgents.add(nextFallback);
+      return this.tryFallbackAgent(task, iteration, startedAt);
+    }
+  }
+
+  /**
+   * Clear rate-limited agents tracking.
+   * Called when a task completes successfully to allow agents to be used again.
+   */
+  private clearRateLimitedAgents(): void {
+    this.rateLimitedAgents.clear();
+  }
+
+  /**
    * Dispose of engine resources
    */
   async dispose(): Promise<void> {
@@ -1187,6 +1320,7 @@ export type {
   ActiveAgentReason,
   ActiveAgentState,
   AgentSwitchedEvent,
+  AllAgentsLimitedEvent,
   EngineEvent,
   EngineEventListener,
   EngineState,

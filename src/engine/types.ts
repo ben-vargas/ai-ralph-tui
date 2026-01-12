@@ -206,6 +206,7 @@ export type EngineEventType =
   | 'task:completed'
   | 'agent:output'
   | 'agent:switched'
+  | 'agent:all-limited'
   | 'all:complete'
   | 'tasks:refreshed';
 
@@ -417,6 +418,20 @@ export interface AgentSwitchedEvent extends EngineEventBase {
 }
 
 /**
+ * All agents limited event - emitted when all agents (primary and fallbacks) are rate limited.
+ * Engine will pause execution when this occurs.
+ */
+export interface AllAgentsLimitedEvent extends EngineEventBase {
+  type: 'agent:all-limited';
+  /** Task that caused the rate limit exhaustion */
+  task: TrackerTask;
+  /** List of agents that were tried (primary + fallbacks) */
+  triedAgents: string[];
+  /** Rate limit state at time of event */
+  rateLimitState: RateLimitState;
+}
+
+/**
  * All tasks complete event
  */
 export interface AllCompleteEvent extends EngineEventBase {
@@ -455,6 +470,7 @@ export type EngineEvent =
   | TaskCompletedEvent
   | AgentOutputEvent
   | AgentSwitchedEvent
+  | AllAgentsLimitedEvent
   | AllCompleteEvent
   | TasksRefreshedEvent;
 
