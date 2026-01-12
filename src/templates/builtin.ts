@@ -53,12 +53,9 @@ export const BEADS_TEMPLATE = `## Bead Details
 
 ## Instructions
 1. Implement the requirements (stay on current branch)
-2. Run: pnpm typecheck && pnpm lint
+2. Run your project's quality checks (typecheck, lint, etc.)
 3. Commit: feat: {{taskId}} - {{taskTitle}}
 4. Close the bead when done (bd update {{taskId}} --status=closed --close_reason="...")
-
----
-Progress file: scripts/ralph/progress.txt
 
 When finished, signal completion with:
 <promise>COMPLETE</promise>
@@ -94,12 +91,9 @@ Completing this task will unblock: {{blocks}}
 
 ## Instructions
 1. Implement the requirements (stay on current branch)
-2. Run: pnpm typecheck && pnpm lint
+2. Run your project's quality checks (typecheck, lint, etc.)
 3. Commit: feat: {{taskId}} - {{taskTitle}}
 4. Close the bead when done (bd update {{taskId}} --status=closed --close_reason="...")
-
----
-Progress file: scripts/ralph/progress.txt
 
 When finished, signal completion with:
 <promise>COMPLETE</promise>
@@ -133,7 +127,7 @@ export const JSON_TEMPLATE = `## User Story
 
 ## Instructions
 1. Implement this user story following the acceptance criteria
-2. Run quality checks: pnpm typecheck && pnpm lint
+2. Run your project's quality checks (typecheck, lint, etc.)
 3. Commit your changes with a descriptive message
 4. The story will be marked as complete when you signal completion
 
