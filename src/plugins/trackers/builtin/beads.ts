@@ -311,7 +311,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
         id: 'labels',
         prompt: 'Labels to filter issues by (comma-separated):',
         type: 'text',
-        default: '',
+        default: 'ralph',
         required: false,
         help: 'Only show issues with these labels (e.g., "ralph,frontend")',
       },
