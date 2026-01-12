@@ -27,3 +27,19 @@ export { AgentRegistry, getAgentRegistry } from './registry.js';
 
 // Export built-in plugin registration
 export { registerBuiltinAgents } from './builtin/index.js';
+
+// Export tracing module for subagent lifecycle tracking
+export { SubagentTraceParser } from './tracing/index.js';
+export type {
+  SubagentEventType,
+  SubagentEventBase,
+  SubagentSpawnEvent,
+  SubagentProgressEvent,
+  SubagentCompleteEvent,
+  SubagentErrorEvent,
+  SubagentEvent,
+  SubagentEventCallback,
+  SubagentState,
+  SubagentTraceParserOptions,
+  SubagentTraceSummary,
+} from './tracing/index.js';
