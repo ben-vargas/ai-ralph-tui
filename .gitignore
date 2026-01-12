@@ -1,8 +1,14 @@
 # bv (beads viewer) local config and caches
 .bv/
 
+# Claude Code local settings
+.claude/settings.local.json
+
 # Ralph runtime/generated files
 tasks/
+
+# Build packaging output
+package/
 
 # Node.js
 node_modules/
@@ -30,8 +36,5 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# Ralph TUI runtime (keep config.toml, ignore runtime state)
-.ralph-tui/session.json
-.ralph-tui/progress.md
-.ralph-tui/iterations/
-.ralph-tui/ralph.lock
+# Ralph TUI runtime (all user-specific state)
+.ralph-tui/
