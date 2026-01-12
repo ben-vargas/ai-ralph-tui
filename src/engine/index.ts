@@ -9,16 +9,22 @@ import type {
   EngineEventListener,
   EngineState,
   EngineStatus,
+  EngineSubagentState,
   ErrorHandlingConfig,
   ErrorHandlingStrategy,
   IterationResult,
   IterationStatus,
+  SubagentTreeNode,
 } from './types.js';
+import { toEngineSubagentState } from './types.js';
 import type { RalphConfig } from '../config/types.js';
 import type { TrackerPlugin, TrackerTask } from '../plugins/trackers/types.js';
 import type { AgentPlugin, AgentExecutionHandle } from '../plugins/agents/types.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
 import { getTrackerRegistry } from '../plugins/trackers/registry.js';
+import { SubagentTraceParser } from '../plugins/agents/tracing/parser.js';
+import type { SubagentEvent } from '../plugins/agents/tracing/types.js';
+import { ClaudeAgentPlugin } from '../plugins/agents/builtin/claude.js';
 import { updateSessionIteration, updateSessionStatus } from '../session/index.js';
 import { saveIterationLog } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
@@ -78,6 +84,8 @@ export class ExecutionEngine {
   private retryCountMap: Map<string, number> = new Map();
   /** Track skipped tasks to avoid retrying them */
   private skippedTasks: Set<string> = new Set();
+  /** Parser for extracting subagent lifecycle events from agent output */
+  private subagentParser: SubagentTraceParser;
 
   constructor(config: RalphConfig) {
     this.config = config;
@@ -91,7 +99,14 @@ export class ExecutionEngine {
       startedAt: null,
       currentOutput: '',
       currentStderr: '',
+      subagents: new Map(),
     };
+
+    // Initialize subagent parser with event handler
+    this.subagentParser = new SubagentTraceParser({
+      onEvent: (event) => this.handleSubagentEvent(event),
+      trackHierarchy: true,
+    });
   }
 
   /**
@@ -488,6 +503,10 @@ export class ExecutionEngine {
     this.state.currentOutput = '';
     this.state.currentStderr = '';
 
+    // Reset subagent tracking for this iteration
+    this.state.subagents.clear();
+    this.subagentParser.reset();
+
     const startedAt = new Date();
     const iteration = this.state.currentIteration;
 
@@ -526,11 +545,20 @@ export class ExecutionEngine {
       flags.push('--model', this.config.model);
     }
 
+    // Check if agent supports subagent tracing
+    const supportsTracing = this.agent!.meta.supportsSubagentTracing;
+
+    // Create streaming JSONL parser if tracing is enabled
+    const jsonlParser = supportsTracing
+      ? ClaudeAgentPlugin.createStreamingJsonlParser()
+      : null;
+
     try {
-      // Execute agent
+      // Execute agent with subagent tracing if supported
       const handle = this.agent!.execute(prompt, [], {
         cwd: this.config.cwd,
         flags,
+        subagentTracing: supportsTracing,
         onStdout: (data) => {
           this.state.currentOutput += data;
           this.emit({
@@ -540,6 +568,16 @@ export class ExecutionEngine {
             data,
             iteration,
           });
+
+          // Parse JSONL output for subagent events if tracing is enabled
+          if (jsonlParser) {
+            const results = jsonlParser.push(data);
+            for (const result of results) {
+              if (result.success) {
+                this.subagentParser.processMessage(result.message);
+              }
+            }
+          }
         },
         onStderr: (data) => {
           this.state.currentStderr += data;
@@ -558,6 +596,16 @@ export class ExecutionEngine {
       // Wait for completion
       const agentResult = await handle.promise;
       this.currentExecution = null;
+
+      // Flush any remaining buffered JSONL data
+      if (jsonlParser) {
+        const remaining = jsonlParser.flush();
+        for (const result of remaining) {
+          if (result.success) {
+            this.subagentParser.processMessage(result.message);
+          }
+        }
+      }
 
       const endedAt = new Date();
       const durationMs = endedAt.getTime() - startedAt.getTime();
@@ -758,6 +806,72 @@ export class ExecutionEngine {
   }
 
   /**
+   * Handle a subagent event from the parser and update engine state.
+   */
+  private handleSubagentEvent(event: SubagentEvent): void {
+    const parserState = this.subagentParser.getSubagent(event.id);
+    if (!parserState) {
+      return;
+    }
+
+    // Calculate depth for this subagent
+    const depth = this.calculateSubagentDepth(event.id);
+
+    // Convert to engine state format and update map
+    const engineState = toEngineSubagentState(parserState, depth);
+    this.state.subagents.set(event.id, engineState);
+  }
+
+  /**
+   * Calculate the nesting depth for a subagent.
+   * Top-level subagents have depth 1, their children have depth 2, etc.
+   */
+  private calculateSubagentDepth(subagentId: string): number {
+    let depth = 1;
+    let current = this.subagentParser.getSubagent(subagentId);
+
+    while (current?.parentId) {
+      depth++;
+      current = this.subagentParser.getSubagent(current.parentId);
+    }
+
+    return depth;
+  }
+
+  /**
+   * Get the subagent tree for TUI rendering.
+   * Returns an array of root-level subagent tree nodes with their children nested.
+   */
+  getSubagentTree(): SubagentTreeNode[] {
+    const roots: SubagentTreeNode[] = [];
+    const nodeMap = new Map<string, SubagentTreeNode>();
+
+    // First pass: create nodes for all subagents
+    for (const state of this.state.subagents.values()) {
+      nodeMap.set(state.id, {
+        state,
+        children: [],
+      });
+    }
+
+    // Second pass: build the tree structure
+    for (const state of this.state.subagents.values()) {
+      const node = nodeMap.get(state.id)!;
+
+      if (state.parentId && nodeMap.has(state.parentId)) {
+        // Add as child of parent
+        const parentNode = nodeMap.get(state.parentId)!;
+        parentNode.children.push(node);
+      } else {
+        // This is a root node
+        roots.push(node);
+      }
+    }
+
+    return roots;
+  }
+
+  /**
    * Dispose of engine resources
    */
   async dispose(): Promise<void> {
@@ -772,8 +886,10 @@ export type {
   EngineEventListener,
   EngineState,
   EngineStatus,
+  EngineSubagentState,
   ErrorHandlingConfig,
   ErrorHandlingStrategy,
   IterationResult,
   IterationStatus,
+  SubagentTreeNode,
 };

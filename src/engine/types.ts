@@ -5,6 +5,80 @@
 
 import type { TrackerTask } from '../plugins/trackers/types.js';
 import type { AgentExecutionResult } from '../plugins/agents/types.js';
+import type { SubagentState as ParserSubagentState } from '../plugins/agents/tracing/types.js';
+
+/**
+ * Status of a tracked subagent in the engine.
+ */
+export type EngineSubagentStatus = 'running' | 'completed' | 'error';
+
+/**
+ * State of a subagent tracked by the engine during an iteration.
+ * This interface matches the acceptance criteria for US-004.
+ */
+export interface EngineSubagentState {
+  /** Unique identifier for this subagent */
+  id: string;
+
+  /** Type of agent (e.g., 'Explore', 'Bash', 'Plan') */
+  type: string;
+
+  /** Human-readable description of what the subagent is doing */
+  description: string;
+
+  /** Current status of the subagent */
+  status: EngineSubagentStatus;
+
+  /** Timestamp when the subagent started (ISO 8601) */
+  startedAt: string;
+
+  /** Timestamp when the subagent completed or errored (ISO 8601) */
+  completedAt?: string;
+
+  /** ID of the parent subagent if this is a nested call */
+  parentId?: string;
+
+  /** IDs of child subagents spawned by this subagent */
+  children: string[];
+
+  /** Duration in milliseconds (computed when ended) */
+  durationMs?: number;
+
+  /** Nesting depth (1 = top-level, 2 = child of top-level, etc.) */
+  depth: number;
+}
+
+/**
+ * Tree node representation of a subagent for TUI rendering.
+ */
+export interface SubagentTreeNode {
+  /** The subagent state */
+  state: EngineSubagentState;
+
+  /** Child nodes in the tree */
+  children: SubagentTreeNode[];
+}
+
+/**
+ * Convert parser SubagentState to engine EngineSubagentState.
+ */
+export function toEngineSubagentState(
+  parserState: ParserSubagentState,
+  depth: number
+): EngineSubagentState {
+  return {
+    id: parserState.id,
+    type: parserState.agentType,
+    description: parserState.description,
+    status: parserState.status,
+    startedAt: parserState.spawnedAt,
+    completedAt: parserState.endedAt,
+    parentId: parserState.parentId,
+    children: [...parserState.childIds],
+    durationMs: parserState.durationMs,
+    depth,
+  };
+}
 
 /**
  * Strategy for handling agent execution errors.
@@ -351,4 +425,10 @@ export interface EngineState {
 
   /** Current iteration stderr buffer */
   currentStderr: string;
+
+  /**
+   * Subagents tracked during the current iteration.
+   * Maps subagent ID to its state.
+   */
+  subagents: Map<string, EngineSubagentState>;
 }
