@@ -816,40 +816,34 @@ export function RunApp({
 
         case '+':
         case '=':
-          // Add 10 iterations to maxIterations (extends the session without stopping)
-          // Handle both '+' (key.name) and Shift+= (key.sequence === '+')
-          if ((key.name === '+' || key.sequence === '+') &&
-              (status === 'ready' || status === 'running' || status === 'executing' || status === 'paused' || status === 'stopped' || status === 'idle' || status === 'complete')) {
-            engine.addIterations(10).then((shouldContinue) => {
-              if (shouldContinue || status === 'complete') {
-                // Engine was idle (stopped due to max_iterations) or complete - restart it
-                setStatus('running');
-                engine.continueExecution();
-              }
-            }).catch((err) => {
-              // Surface iteration addition errors to user
-              console.error('Failed to add iterations:', err);
-            });
-          }
-          break;
-
         case '-':
         case '_':
-          // Remove 10 iterations from maxIterations (but not below 1 or current iteration)
-          // Handle both '-' (key.name) and Shift+- (key.sequence === '-')
-          if ((key.name === '-' || key.sequence === '-') &&
+          // Add/remove 10 iterations - works with or without shift
+          // key.name: '+' or '-' | key.sequence: '+' (Shift+=) or '_' (Shift+-)
+          const isPlus = key.name === '+' || key.sequence === '+';
+          const isMinus = key.name === '-' || key.sequence === '-';
+          if ((isPlus || isMinus) &&
               (status === 'ready' || status === 'running' || status === 'executing' || status === 'paused' || status === 'stopped' || status === 'idle' || status === 'complete')) {
-            engine.removeIterations(10)
-              .then((success) => {
-                if (!success) {
-                  // Removal was blocked (at min limit)
-                  console.log('Cannot reduce below current iteration or minimum of 1');
+            if (isPlus) {
+              engine.addIterations(10).then((shouldContinue) => {
+                if (shouldContinue || status === 'complete') {
+                  setStatus('running');
+                  engine.continueExecution();
                 }
-              })
-              .catch((err) => {
-                // Surface iteration removal errors to user
-                console.error('Failed to remove iterations:', err);
+              }).catch((err) => {
+                console.error('Failed to add iterations:', err);
               });
+            } else {
+              engine.removeIterations(10)
+                .then((success) => {
+                  if (!success) {
+                    console.log('Cannot reduce below current iteration or minimum of 1');
+                  }
+                })
+                .catch((err) => {
+                  console.error('Failed to remove iterations:', err);
+                });
+            }
           }
           break;
 
