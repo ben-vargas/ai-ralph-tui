@@ -48,3 +48,7 @@ Thumbs.db
 # Ralph TUI runtime (all user-specific state)
 .ralph-tui/
 .envrc
+
+# Local examples and test files
+examples/
+prd-example.json
