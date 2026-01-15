@@ -62,6 +62,17 @@ export interface NotificationsConfig {
   sound?: NotificationSoundMode;
 }
 
+export type SandboxMode = 'auto' | 'bwrap' | 'docker' | 'off';
+
+export interface SandboxConfig {
+  enabled?: boolean;
+  mode?: SandboxMode;
+  network?: boolean;
+  allowPaths?: string[];
+  readOnlyPaths?: string[];
+  image?: string;
+}
+
 /**
  * Runtime options that can be passed via CLI flags
  */
@@ -149,6 +160,8 @@ export interface StoredConfig {
   /** Error handling configuration */
   errorHandling?: Partial<ErrorHandlingConfig>;
 
+  sandbox?: SandboxConfig;
+
   /** Shorthand: agent plugin name */
   agent?: string;
 
@@ -227,6 +240,8 @@ export interface RalphConfig {
 
   /** Error handling configuration */
   errorHandling: ErrorHandlingConfig;
+
+  sandbox?: SandboxConfig;
 
   /** Custom prompt template path (resolved) */
   promptTemplate?: string;
