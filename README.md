@@ -6,7 +6,7 @@
 
 **AI Agent Loop Orchestrator** - A terminal UI for orchestrating AI coding agents to work through task lists autonomously.
 
-Ralph TUI connects your AI coding assistant (Claude Code, OpenCode) to your task tracker and runs them in an autonomous loop, completing tasks one-by-one with intelligent selection, error handling, and full visibility.
+Ralph TUI connects your AI coding assistant (Claude Code, OpenCode, Factory Droid) to your task tracker and runs them in an autonomous loop, completing tasks one-by-one with intelligent selection, error handling, and full visibility.
 
 ![Ralph TUI Screenshot](docs/images/ralph-tui.png)
 
@@ -206,10 +206,8 @@ ralph-tui/
 ### Key Technologies
 
 - [Bun](https://bun.sh) - JavaScript runtime
-- [OpenTUI](https://github.com/anomalyco/opentui) - Terminal UI framework
-- [React](https://react.dev) - Component model for TUI
+- [OpenTUI](https://github.com/sst/opentui) - Terminal UI framework
 - [Handlebars](https://handlebarsjs.com) - Prompt templating
-- [Zod](https://zod.dev) - Configuration validation
 
 See [CLAUDE.md](CLAUDE.md) for detailed development guidelines.
 
