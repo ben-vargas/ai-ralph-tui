@@ -4,6 +4,8 @@
  * (Claude Code, OpenCode, Cursor, etc.)
  */
 
+import type { SandboxConfig } from '../../sandbox/types.js';
+
 /**
  * Result of detecting whether an agent CLI is available.
  */
@@ -98,6 +100,8 @@ export interface AgentExecuteOptions {
 
   /** Additional CLI flags to pass to the agent */
   flags?: string[];
+
+  sandbox?: SandboxConfig;
 
   /** Callback for streaming stdout */
   onStdout?: (data: string) => void;
