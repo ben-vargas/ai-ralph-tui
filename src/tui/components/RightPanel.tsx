@@ -10,7 +10,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { colors, getTaskStatusColor, getTaskStatusIndicator } from '../theme.js';
 import type { RightPanelProps, DetailsViewMode, IterationTimingInfo, SubagentTreeNode, TaskPriority } from '../types.js';
 import type { SubagentDetailLevel } from '../../config/types.js';
-import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
+import { stripAnsiCodes, type FormattedSegment } from '../../plugins/agents/output-formatting.js';
 import { formatElapsedTime } from '../theme.js';
 import { SubagentSections } from './SubagentSection.js';
 import { parseAgentOutput } from '../output-parser.js';
@@ -562,19 +562,21 @@ function TaskOutputView({
 
   // For live streaming, prefer segments for TUI-native colors
   // For historical/completed output, parse the string to extract readable content
+  // ALWAYS strip ANSI codes - they cause black background artifacts in OpenTUI
   const displayOutput = useMemo(() => {
     if (!iterationOutput) return undefined;
-    // For live output during execution, show raw for streaming updates (fallback if no segments)
+    // For live output during execution, strip ANSI but keep raw content
     if (isLiveStreaming) {
-      return iterationOutput;
+      return stripAnsiCodes(iterationOutput);
     }
     // For completed output (historical or from current session), parse to extract readable content
+    // parseAgentOutput already strips ANSI codes
     return parseAgentOutput(iterationOutput, agentName);
   }, [iterationOutput, isLiveStreaming, agentName]);
 
-  // Use segments for TUI-native color rendering during live streaming
-  // For historical output, displayOutput (plain text) is used as fallback
-  const displaySegments = isLiveStreaming && iterationSegments && iterationSegments.length > 0
+  // Use segments for TUI-native color rendering when available
+  // Works for both live streaming and completed output (if segments were captured)
+  const displaySegments = iterationSegments && iterationSegments.length > 0
     ? iterationSegments
     : undefined;
 
