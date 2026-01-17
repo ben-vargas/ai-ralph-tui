@@ -287,8 +287,15 @@ describe('doctor result structure', () => {
   let consoleLogSpy: ReturnType<typeof spyOn>;
   let processExitSpy: ReturnType<typeof spyOn>;
   let output: string[];
+  let originalCwd: string;
+  let tempDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Save original cwd and create isolated temp directory
+    originalCwd = process.cwd();
+    tempDir = await createTempDir();
+    process.chdir(tempDir);
+
     mockDetectResult = { available: true, version: '2.0.0', executablePath: '/custom/path' };
     mockPreflightResult = { success: true, durationMs: 250 };
     output = [];
@@ -301,14 +308,18 @@ describe('doctor result structure', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     consoleLogSpy.mockRestore();
     processExitSpy.mockRestore();
+
+    // Restore original cwd and clean up temp directory
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
   });
 
   test('includes version in detection result', async () => {
     try {
-      await executeDoctorCommand(['--json']);
+      await executeDoctorCommand(['--json', '--cwd', tempDir]);
     } catch {
       // Expected
     }
@@ -321,7 +332,7 @@ describe('doctor result structure', () => {
 
   test('includes executable path in detection result', async () => {
     try {
-      await executeDoctorCommand(['--json']);
+      await executeDoctorCommand(['--json', '--cwd', tempDir]);
     } catch {
       // Expected
     }
@@ -334,7 +345,7 @@ describe('doctor result structure', () => {
 
   test('includes duration in preflight result', async () => {
     try {
-      await executeDoctorCommand(['--json']);
+      await executeDoctorCommand(['--json', '--cwd', tempDir]);
     } catch {
       // Expected
     }

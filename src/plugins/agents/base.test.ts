@@ -242,29 +242,29 @@ describe('BaseAgentPlugin', () => {
 
   describe('initialize', () => {
     test('sets ready state to true', async () => {
-      expect(agent.isReady()).resolves.toBe(false);
+      await expect(agent.isReady()).resolves.toBe(false);
 
       await agent.initialize({});
 
-      expect(agent.isReady()).resolves.toBe(true);
+      await expect(agent.isReady()).resolves.toBe(true);
     });
 
     test('can be configured with custom command', async () => {
       await agent.initialize({ command: '/custom/path/agent' });
 
       // The command should be stored (implementation detail)
-      expect(agent.isReady()).resolves.toBe(true);
+      await expect(agent.isReady()).resolves.toBe(true);
     });
   });
 
   describe('dispose', () => {
     test('sets ready state to false', async () => {
       await agent.initialize({});
-      expect(agent.isReady()).resolves.toBe(true);
+      await expect(agent.isReady()).resolves.toBe(true);
 
       await agent.dispose();
 
-      expect(agent.isReady()).resolves.toBe(false);
+      await expect(agent.isReady()).resolves.toBe(false);
     });
   });
 
