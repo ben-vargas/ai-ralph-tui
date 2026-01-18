@@ -316,8 +316,8 @@ export class ExecutionEngine {
       return { success: false, error: 'No tracker configured' };
     }
 
-    // Get the task
-    const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress'] });
+    // Get the task (include completed tasks so we can review prompts after execution)
+    const tasks = await this.tracker.getTasks({ status: ['open', 'in_progress', 'completed'] });
     const task = tasks.find((t) => t.id === taskId);
     if (!task) {
       return { success: false, error: `Task not found: ${taskId}` };
