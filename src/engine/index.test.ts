@@ -1,39 +1,16 @@
 /**
  * ABOUTME: Tests for the ExecutionEngine, focusing on prompt preview generation.
  * Verifies that prompt preview works for tasks in all statuses including completed.
+ *
+ * These tests avoid mock.module() to prevent interfering with other test files.
+ * The tracker is injected directly, and filesystem functions gracefully handle
+ * non-existent paths by returning empty strings.
  */
 
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect } from 'bun:test';
 import type { TrackerPlugin, TrackerTask, TaskFilter } from '../plugins/trackers/types.js';
 import type { RalphConfig } from '../config/types.js';
-
-// Mock the external dependencies that buildPrompt needs
-mock.module('../logs/index.js', () => ({
-  getRecentProgressSummary: async () => '',
-  getCodebasePatternsForPrompt: async () => '',
-  saveIterationLog: async () => {},
-  buildSubagentTrace: () => [],
-  createProgressEntry: () => ({}),
-  appendProgress: async () => {},
-}));
-
-mock.module('../session/index.js', () => ({
-  updateSessionIteration: () => {},
-  updateSessionStatus: () => {},
-  updateSessionMaxIterations: () => {},
-}));
-
-// Mock templates to return predictable output
-mock.module('../templates/index.js', () => ({
-  renderPrompt: (task: TrackerTask) => ({
-    success: true,
-    prompt: `Prompt for task: ${task.id} - ${task.title}`,
-    source: 'test-template',
-  }),
-}));
-
-// Import after mocking
-const { ExecutionEngine } = await import('./index.js');
+import { ExecutionEngine } from './index.js';
 
 /**
  * Creates a minimal mock tracker for testing.
@@ -56,7 +33,8 @@ function createMockTracker(tasks: TrackerTask[]): TrackerPlugin {
       const statuses = Array.isArray(options.status) ? options.status : [options.status];
       return tasks.filter((t) => statuses.includes(t.status));
     },
-    getTemplate: () => 'mock-template',
+    // Provide a simple Handlebars template that includes task ID and title
+    getTemplate: () => `Task: {{taskId}} - {{taskTitle}}`,
     getPrdContext: async () => null,
   };
   return mockTracker as TrackerPlugin;
@@ -76,18 +54,20 @@ function createMockTask(overrides: Partial<TrackerTask> = {}): TrackerTask {
 }
 
 /**
- * Creates a minimal RalphConfig for testing
+ * Creates a minimal RalphConfig for testing.
+ * Uses /tmp paths that don't exist to ensure filesystem functions
+ * gracefully return empty strings.
  */
 function createMockConfig(): RalphConfig {
   return {
-    cwd: '/test',
+    cwd: '/tmp/ralph-test-nonexistent',
     model: 'test-model',
     agent: { name: 'test', plugin: 'claude', options: {} },
     tracker: { name: 'test', plugin: 'json', options: {} },
     maxIterations: 10,
     iterationDelay: 1000,
-    outputDir: '/test/output',
-    progressFile: '/test/progress.md',
+    outputDir: '/tmp/ralph-test-nonexistent/output',
+    progressFile: '/tmp/ralph-test-nonexistent/progress.md',
     showTui: false,
     errorHandling: {
       strategy: 'skip',
@@ -158,7 +138,6 @@ describe('ExecutionEngine', () => {
       if (result.success) {
         expect(result.prompt).toContain('task-done');
         expect(result.prompt).toContain('Completed Task');
-        expect(result.source).toBe('test-template');
       }
     });
 
