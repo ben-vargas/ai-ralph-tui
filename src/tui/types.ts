@@ -154,6 +154,11 @@ export interface IterationTimingInfo {
 /**
  * Props for the RightPanel (details) component
  */
+/**
+ * Connection status for remote instances
+ */
+export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
+
 export interface RightPanelProps {
   /** Currently selected task (null if none selected) */
   selectedTask: TaskItem | null;
@@ -177,6 +182,12 @@ export interface RightPanelProps {
   promptPreview?: string;
   /** Source of the template used for the prompt (e.g., 'tracker:beads', 'builtin:json') */
   templateSource?: string;
+  /** Whether currently viewing a remote instance */
+  isViewingRemote?: boolean;
+  /** Connection status when viewing remote */
+  remoteConnectionStatus?: ConnectionStatus;
+  /** Alias of the remote being viewed */
+  remoteAlias?: string;
 }
 
 /**

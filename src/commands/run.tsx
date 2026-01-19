@@ -5,7 +5,7 @@
  * Implements graceful interruption with Ctrl+C confirmation dialog.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
 import { buildConfig, validateConfig, loadStoredConfig, saveProjectConfig } from '../config/index.js';
@@ -67,6 +67,57 @@ import {
   type InstanceTab,
 } from '../remote/index.js';
 import type { ConnectionToastMessage } from '../tui/components/Toast.js';
+import { spawnSync } from 'node:child_process';
+import { basename } from 'node:path';
+
+/**
+ * Get git repository information for the current working directory.
+ * Returns undefined values if not a git repository or git command fails.
+ */
+function getGitInfo(cwd: string): {
+  repoName?: string;
+  branch?: string;
+  isDirty?: boolean;
+  commitHash?: string;
+} {
+  try {
+    // Get repository root name
+    const repoRoot = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const repoName = repoRoot.status === 0 ? basename(repoRoot.stdout.trim()) : undefined;
+
+    // Get current branch
+    const branchResult = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const branch = branchResult.status === 0 ? branchResult.stdout.trim() : undefined;
+
+    // Check for uncommitted changes
+    const statusResult = spawnSync('git', ['status', '--porcelain'], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const isDirty = statusResult.status === 0 ? statusResult.stdout.trim().length > 0 : undefined;
+
+    // Get short commit hash
+    const hashResult = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const commitHash = hashResult.status === 0 ? hashResult.stdout.trim() : undefined;
+
+    return { repoName, branch, isDirty, commitHash };
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Extended runtime options with noSetup, verify, and listen flags
@@ -678,6 +729,9 @@ function RunAppWrapper({
   const [tasks, setTasks] = useState<TrackerTask[]>(initialTasks ?? []);
   const [currentEpicId, setCurrentEpicId] = useState<string | undefined>(initialEpicId);
 
+  // Local git info (computed once on mount, static for the session)
+  const localGitInfo = useMemo(() => getGitInfo(cwd), [cwd]);
+
   // Remote instance management
   const [instanceManager] = useState(() => new InstanceManager());
   const [instanceTabs, setInstanceTabs] = useState<InstanceTab[]>([]);
@@ -840,6 +894,7 @@ function RunAppWrapper({
       connectionToast={connectionToast}
       instanceManager={instanceManager}
       initialShowEpicLoader={initialShowEpicLoader}
+      localGitInfo={localGitInfo}
     />
   );
 }
@@ -1693,6 +1748,14 @@ export async function executeRunCommand(args: string[]): Promise<void> {
         isNew = result.isNew;
       }
 
+      // Get git info for remote display
+      const gitInfo = getGitInfo(cwd);
+
+      // Resolve sandbox mode for remote display
+      const resolvedSandboxModeForRemote = config.sandbox?.enabled
+        ? (config.sandbox.mode === 'auto' ? await detectSandboxMode() : config.sandbox.mode)
+        : undefined;
+
       // Create and start the remote server
       remoteServer = await createRemoteServer({
         port: listenPort,
@@ -1702,6 +1765,14 @@ export async function executeRunCommand(args: string[]): Promise<void> {
         trackerName: config.tracker.plugin,
         currentModel: config.model,
         autoCommit: storedConfig?.autoCommit,
+        sandboxConfig: config.sandbox?.enabled ? {
+          enabled: true,
+          mode: config.sandbox.mode,
+          network: config.sandbox.network,
+        } : undefined,
+        resolvedSandboxMode: resolvedSandboxModeForRemote,
+        gitInfo,
+        cwd,
       });
       const serverState = await remoteServer.start();
       const actualPort = serverState.port;

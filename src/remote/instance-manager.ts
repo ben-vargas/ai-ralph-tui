@@ -649,6 +649,133 @@ export class InstanceManager {
     const client = this.clients.get(alias);
     return client && client.status === 'connected' ? client : null;
   }
+
+  // ============================================================================
+  // Remote Management Methods (for TUI add/edit/delete)
+  // ============================================================================
+
+  /**
+   * Add a new remote and connect to it.
+   * Called from TUI when user adds a new remote via the RemoteManagementOverlay.
+   * @param alias The alias for the new remote
+   * @param host The host address
+   * @param port The port number
+   * @param token The authentication token
+   */
+  async addAndConnectRemote(alias: string, host: string, port: number, token: string): Promise<void> {
+    // Store the config in memory
+    const config: RemoteServerConfig = {
+      host,
+      port,
+      token,
+      addedAt: new Date().toISOString(),
+    };
+    this.remoteConfigs.set(alias, config);
+
+    // Create and add the tab
+    const tab = createRemoteTab(alias, host, port);
+    this.tabs.push(tab);
+
+    // Notify listeners of the new tab
+    this.notifyStateChange();
+
+    // Connect to the new remote
+    await this.connectToRemote(tab);
+  }
+
+  /**
+   * Disconnect from a remote by alias.
+   * Used before editing or deleting a remote.
+   * @param alias The alias of the remote to disconnect
+   */
+  disconnectRemote(alias: string): void {
+    const client = this.clients.get(alias);
+    if (client) {
+      client.disconnect();
+      this.clients.delete(alias);
+    }
+
+    // Update tab status
+    const tab = this.tabs.find((t) => t.alias === alias);
+    if (tab) {
+      tab.status = 'disconnected';
+      this.notifyStateChange();
+    }
+  }
+
+  /**
+   * Remove a tab by alias.
+   * Called after deleting a remote from config.
+   * @param alias The alias of the remote to remove
+   */
+  removeTab(alias: string): void {
+    // Disconnect first
+    this.disconnectRemote(alias);
+
+    // Remove from config cache
+    this.remoteConfigs.delete(alias);
+
+    // Remove the tab
+    const tabIndex = this.tabs.findIndex((t) => t.alias === alias);
+    if (tabIndex !== -1) {
+      this.tabs.splice(tabIndex, 1);
+
+      // Adjust selected index if needed
+      if (this.selectedIndex >= this.tabs.length) {
+        this.selectedIndex = Math.max(0, this.tabs.length - 1);
+      } else if (this.selectedIndex > tabIndex) {
+        // If we removed a tab before the selected one, adjust the index
+        this.selectedIndex--;
+      }
+
+      this.notifyStateChange();
+    }
+  }
+
+  /**
+   * Reconnect to a remote after editing its configuration.
+   * Updates the tab with new host/port and reconnects.
+   * @param alias The alias of the remote
+   * @param host The new host address
+   * @param port The new port number
+   * @param token The new authentication token
+   */
+  async reconnectRemote(alias: string, host: string, port: number, token: string): Promise<void> {
+    // Disconnect existing connection
+    this.disconnectRemote(alias);
+
+    // Update config in memory
+    const existingConfig = this.remoteConfigs.get(alias);
+    const config: RemoteServerConfig = {
+      host,
+      port,
+      token,
+      addedAt: existingConfig?.addedAt ?? new Date().toISOString(),
+      lastConnected: existingConfig?.lastConnected,
+    };
+    this.remoteConfigs.set(alias, config);
+
+    // Update tab info
+    const tab = this.tabs.find((t) => t.alias === alias);
+    if (tab) {
+      tab.host = host;
+      tab.port = port;
+      tab.label = alias; // Keep the label as the alias
+
+      // Reconnect
+      await this.connectToRemote(tab);
+    }
+  }
+
+  /**
+   * Get the index of a tab by alias.
+   * Used to select a newly added remote.
+   * @param alias The alias to find
+   * @returns The tab index, or -1 if not found
+   */
+  getTabIndexByAlias(alias: string): number {
+    return this.tabs.findIndex((t) => t.alias === alias);
+  }
 }
 
 /**

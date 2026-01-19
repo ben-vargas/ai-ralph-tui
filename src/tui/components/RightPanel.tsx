@@ -138,9 +138,88 @@ function formatTimestamp(isoString: string): string {
 
 /**
  * Display when no task is selected.
- * Shows helpful setup instructions for new users.
+ * Shows connection status for remote instances, or setup instructions for local.
  */
-function NoSelection(): ReactNode {
+function NoSelection({
+  isViewingRemote = false,
+  remoteConnectionStatus,
+  remoteAlias,
+}: {
+  isViewingRemote?: boolean;
+  remoteConnectionStatus?: 'connected' | 'connecting' | 'disconnected' | 'reconnecting';
+  remoteAlias?: string;
+}): ReactNode {
+  // Show connection-specific help for remote instances
+  if (isViewingRemote && remoteConnectionStatus !== 'connected') {
+    return (
+      <box
+        style={{
+          flexGrow: 1,
+          flexDirection: 'column',
+          padding: 2,
+        }}
+      >
+        <box style={{ marginBottom: 1 }}>
+          <text fg={colors.status.warning}>
+            {remoteConnectionStatus === 'connecting' && '◐ Connecting...'}
+            {remoteConnectionStatus === 'reconnecting' && '⟳ Reconnecting...'}
+            {remoteConnectionStatus === 'disconnected' && '○ Not Connected'}
+          </text>
+        </box>
+
+        {remoteConnectionStatus === 'disconnected' && (
+          <>
+            <box style={{ marginBottom: 2 }}>
+              <text fg={colors.fg.secondary}>
+                Remote "{remoteAlias}" is not connected.
+              </text>
+            </box>
+            <box style={{ flexDirection: 'column', gap: 1 }}>
+              <text fg={colors.fg.muted}>Possible causes:</text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Remote server is not running
+              </text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Network connectivity issues
+              </text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Incorrect host/port configuration
+              </text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Authentication token mismatch
+              </text>
+            </box>
+            <box style={{ marginTop: 2, flexDirection: 'column', gap: 1 }}>
+              <text fg={colors.fg.muted}>Try:</text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Press{' '}
+                <span fg={colors.fg.secondary}>[</span> or{' '}
+                <span fg={colors.fg.secondary}>]</span> to switch tabs
+              </text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Press{' '}
+                <span fg={colors.fg.secondary}>e</span> to edit remote config
+              </text>
+              <text fg={colors.fg.muted}>
+                <span fg={colors.accent.primary}>•</span> Press{' '}
+                <span fg={colors.fg.secondary}>x</span> to delete this remote
+              </text>
+            </box>
+          </>
+        )}
+
+        {(remoteConnectionStatus === 'connecting' || remoteConnectionStatus === 'reconnecting') && (
+          <box style={{ marginTop: 1 }}>
+            <text fg={colors.fg.muted}>
+              Attempting to connect to {remoteAlias}...
+            </text>
+          </box>
+        )}
+      </box>
+    );
+  }
+
+  // Default: show setup instructions for local instance
   return (
     <box
       style={{
@@ -826,6 +905,9 @@ export function RightPanel({
   currentModel,
   promptPreview,
   templateSource,
+  isViewingRemote = false,
+  remoteConnectionStatus,
+  remoteAlias,
 }: RightPanelProps): ReactNode {
   // Build title with view mode indicator
   const modeIndicators: Record<typeof viewMode, string> = {
@@ -863,7 +945,11 @@ export function RightPanel({
           templateSource={templateSource}
         />
       ) : (
-        <NoSelection />
+        <NoSelection
+          isViewingRemote={isViewingRemote}
+          remoteConnectionStatus={remoteConnectionStatus}
+          remoteAlias={remoteAlias}
+        />
       )}
     </box>
   );

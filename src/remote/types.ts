@@ -304,6 +304,29 @@ export interface StateResponseMessage extends WSMessage {
  * Serializable engine state for remote transport.
  * Based on EngineState but with Map converted to array for JSON serialization.
  */
+/**
+ * Sandbox configuration for remote display
+ */
+export interface RemoteSandboxConfig {
+  enabled: boolean;
+  mode?: 'auto' | 'bwrap' | 'sandbox-exec' | 'off';
+  network?: boolean;
+}
+
+/**
+ * Git repository information for remote display
+ */
+export interface RemoteGitInfo {
+  /** Repository name (e.g., "ralph-tui") */
+  repoName?: string;
+  /** Current branch name */
+  branch?: string;
+  /** Whether there are uncommitted changes */
+  isDirty?: boolean;
+  /** Short commit hash of HEAD */
+  commitHash?: string;
+}
+
 export interface RemoteEngineState {
   status: EngineStatus;
   currentIteration: number;
@@ -329,6 +352,14 @@ export interface RemoteEngineState {
   subagentTree?: SubagentTreeNode[];
   /** Whether auto-commit is enabled on the remote */
   autoCommit?: boolean;
+  /** Sandbox configuration for display */
+  sandboxConfig?: RemoteSandboxConfig;
+  /** Resolved sandbox mode (when mode is 'auto') */
+  resolvedSandboxMode?: 'bwrap' | 'sandbox-exec' | 'off';
+  /** Git repository information */
+  gitInfo?: RemoteGitInfo;
+  /** Current working directory */
+  cwd?: string;
 }
 
 /**

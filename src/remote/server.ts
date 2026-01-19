@@ -132,6 +132,27 @@ export interface RemoteServerOptions {
 
   /** Whether auto-commit is enabled */
   autoCommit?: boolean;
+
+  /** Sandbox configuration for display */
+  sandboxConfig?: {
+    enabled: boolean;
+    mode?: 'auto' | 'bwrap' | 'sandbox-exec' | 'off';
+    network?: boolean;
+  };
+
+  /** Resolved sandbox mode (when mode is 'auto') */
+  resolvedSandboxMode?: 'bwrap' | 'sandbox-exec' | 'off';
+
+  /** Git repository information */
+  gitInfo?: {
+    repoName?: string;
+    branch?: string;
+    isDirty?: boolean;
+    commitHash?: string;
+  };
+
+  /** Current working directory */
+  cwd?: string;
 }
 
 /**
@@ -652,6 +673,13 @@ export class RemoteServer {
       subagentTree: this.options.engine.getSubagentTree(),
       // Include config settings for TUI display
       autoCommit: this.options.autoCommit,
+      // Include sandbox info for TUI display
+      sandboxConfig: this.options.sandboxConfig,
+      resolvedSandboxMode: this.options.resolvedSandboxMode,
+      // Include git info for TUI display
+      gitInfo: this.options.gitInfo,
+      // Include cwd for TUI display
+      cwd: this.options.cwd,
     };
 
     const response = createMessage<StateResponseMessage>('state_response', {
@@ -1388,6 +1416,10 @@ export async function createRemoteServer(
     trackerName: options.trackerName,
     currentModel: options.currentModel,
     autoCommit: options.autoCommit,
+    sandboxConfig: options.sandboxConfig,
+    resolvedSandboxMode: options.resolvedSandboxMode,
+    gitInfo: options.gitInfo,
+    cwd: options.cwd,
   };
 
   return new RemoteServer(serverOptions);

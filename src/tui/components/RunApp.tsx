@@ -29,9 +29,12 @@ import { SubagentTreePanel } from './SubagentTreePanel.js';
 import { TabBar } from './TabBar.js';
 import { RemoteConfigView } from './RemoteConfigView.js';
 import type { RemoteConfigData } from './RemoteConfigView.js';
+import { RemoteManagementOverlay } from './RemoteManagementOverlay.js';
+import type { RemoteManagementMode, ExistingRemoteData } from './RemoteManagementOverlay.js';
 import { Toast, formatConnectionToast } from './Toast.js';
 import type { ConnectionToastMessage } from './Toast.js';
 import type { InstanceTab } from '../../remote/client.js';
+import { addRemote, removeRemote, getRemote } from '../../remote/config.js';
 import type {
   ExecutionEngine,
   EngineEvent,
@@ -130,6 +133,13 @@ export interface RunAppProps {
   instanceManager?: import('../../remote/instance-manager.js').InstanceManager;
   /** Whether to show the epic loader immediately on startup (for json tracker without PRD path) */
   initialShowEpicLoader?: boolean;
+  /** Local git repository info (from server's working directory) */
+  localGitInfo?: {
+    repoName?: string;
+    branch?: string;
+    isDirty?: boolean;
+    commitHash?: string;
+  };
 }
 
 /**
@@ -342,6 +352,7 @@ export function RunApp({
   connectionToast,
   instanceManager,
   initialShowEpicLoader = false,
+  localGitInfo,
 }: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const renderer = useRenderer();
@@ -399,6 +410,10 @@ export function RunApp({
   const [remoteConfigData, setRemoteConfigData] = useState<RemoteConfigData | null>(null);
   const [remoteConfigLoading, setRemoteConfigLoading] = useState(false);
   const [remoteConfigError, setRemoteConfigError] = useState<string | undefined>(undefined);
+  // Remote management overlay state (add/edit/delete remotes)
+  const [showRemoteManagement, setShowRemoteManagement] = useState(false);
+  const [remoteManagementMode, setRemoteManagementMode] = useState<RemoteManagementMode>('add');
+  const [editingRemote, setEditingRemote] = useState<ExistingRemoteData | undefined>(undefined);
   // Quit confirmation dialog state
   const [showQuitDialog, setShowQuitDialog] = useState(false);
   // Show/hide closed tasks filter (default: show closed tasks)
@@ -488,6 +503,16 @@ export function RunApp({
   const [remoteTrackerName, setRemoteTrackerName] = useState<string | undefined>(undefined);
   const [remoteModel, setRemoteModel] = useState<string | undefined>(undefined);
   const [remoteAutoCommit, setRemoteAutoCommit] = useState<boolean | undefined>(undefined);
+  // Remote sandbox config for display
+  const [remoteSandboxConfig, setRemoteSandboxConfig] = useState<SandboxConfig | undefined>(undefined);
+  const [remoteResolvedSandboxMode, setRemoteResolvedSandboxMode] = useState<Exclude<SandboxMode, 'auto'> | undefined>(undefined);
+  // Remote git info for display
+  const [remoteGitInfo, setRemoteGitInfo] = useState<{
+    repoName?: string;
+    branch?: string;
+    isDirty?: boolean;
+    commitHash?: string;
+  } | undefined>(undefined);
   // Cache for remote iteration output by task ID (similar to historicalOutputCache for local)
   const [remoteIterationCache, setRemoteIterationCache] = useState<Map<string, {
     iteration: number;
@@ -554,6 +579,21 @@ export function RunApp({
         // Capture auto-commit setting for status display
         if (state.autoCommit !== undefined) {
           setRemoteAutoCommit(state.autoCommit);
+        }
+        // Capture sandbox config for display
+        if (state.sandboxConfig) {
+          setRemoteSandboxConfig({
+            enabled: state.sandboxConfig.enabled,
+            mode: state.sandboxConfig.mode,
+            network: state.sandboxConfig.network,
+          });
+        }
+        if (state.resolvedSandboxMode) {
+          setRemoteResolvedSandboxMode(state.resolvedSandboxMode);
+        }
+        // Capture git info for display
+        if (state.gitInfo) {
+          setRemoteGitInfo(state.gitInfo);
         }
         // Set remote subagent tree if available
         if (state.subagentTree) {
@@ -1217,6 +1257,11 @@ export function RunApp({
         return;
       }
 
+      // When remote management overlay is showing, let it handle its own keyboard events
+      if (showRemoteManagement) {
+        return;
+      }
+
       switch (key.name) {
         case 'q':
           // Show quit confirmation dialog
@@ -1499,6 +1544,11 @@ export function RunApp({
 
         case 'l':
           // Open epic loader to switch epics (only when not executing)
+          // Disabled for remote instances - epic loading is local-only
+          if (isViewingRemote) {
+            setInfoFeedback('Epic/PRD loading not available for remote instances');
+            break;
+          }
           if (onLoadEpics && (status === 'ready' || status === 'paused' || status === 'stopped' || status === 'idle' || status === 'complete' || status === 'error')) {
             setShowEpicLoader(true);
             setEpicLoaderLoading(true);
@@ -1617,9 +1667,61 @@ export function RunApp({
             onSelectTab(nextIndex);
           }
           break;
+
+        // Remote management: 'a' to add new remote
+        case 'a':
+          // Open add remote overlay
+          setRemoteManagementMode('add');
+          setEditingRemote(undefined);
+          setShowRemoteManagement(true);
+          break;
+
+        // Remote management: 'e' to edit current remote (only when viewing a remote tab)
+        case 'e':
+          if (isViewingRemote && instanceTabs && selectedTabIndex > 0) {
+            const tab = instanceTabs[selectedTabIndex];
+            if (tab?.alias) {
+              // Load remote data for editing
+              getRemote(tab.alias).then((config) => {
+                if (config) {
+                  setEditingRemote({
+                    alias: tab.alias!,
+                    host: config.host,
+                    port: config.port,
+                    token: config.token,
+                  });
+                  setRemoteManagementMode('edit');
+                  setShowRemoteManagement(true);
+                }
+              });
+            }
+          }
+          break;
+
+        // Remote management: 'x' to delete current remote (only when viewing a remote tab)
+        case 'x':
+          if (isViewingRemote && instanceTabs && selectedTabIndex > 0) {
+            const tab = instanceTabs[selectedTabIndex];
+            if (tab?.alias) {
+              // Load remote data for delete confirmation
+              getRemote(tab.alias).then((config) => {
+                if (config) {
+                  setEditingRemote({
+                    alias: tab.alias!,
+                    host: config.host,
+                    port: config.port,
+                    token: config.token,
+                  });
+                  setRemoteManagementMode('delete');
+                  setShowRemoteManagement(true);
+                }
+              });
+            }
+          }
+          break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote]
   );
 
   useKeyboard(handleKeyboard);
@@ -2135,8 +2237,8 @@ export function RunApp({
         currentIteration={displayCurrentIteration}
         maxIterations={displayMaxIterations}
         currentModel={displayModel}
-        sandboxConfig={sandboxConfig}
-        resolvedSandboxMode={resolvedSandboxMode}
+        sandboxConfig={isViewingRemote ? remoteSandboxConfig : sandboxConfig}
+        resolvedSandboxMode={isViewingRemote ? remoteResolvedSandboxMode : resolvedSandboxMode}
         remoteInfo={
           isViewingRemote && instanceTabs?.[selectedTabIndex]
             ? {
@@ -2158,8 +2260,8 @@ export function RunApp({
           epicName={epicName}
           currentTaskId={displayCurrentTaskId}
           currentTaskTitle={displayCurrentTaskTitle}
-          sandboxConfig={sandboxConfig}
-          resolvedSandboxMode={resolvedSandboxMode}
+          sandboxConfig={isViewingRemote ? remoteSandboxConfig : sandboxConfig}
+          resolvedSandboxMode={isViewingRemote ? remoteResolvedSandboxMode : resolvedSandboxMode}
           remoteInfo={
             isViewingRemote && instanceTabs?.[selectedTabIndex]
               ? {
@@ -2170,6 +2272,7 @@ export function RunApp({
               : undefined
           }
           autoCommit={isViewingRemote ? remoteAutoCommit : storedConfig?.autoCommit}
+          gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
         />
       )}
 
@@ -2203,6 +2306,9 @@ export function RunApp({
               tasks={displayedTasks}
               selectedIndex={selectedIndex}
               isFocused={!subagentPanelVisible || focusedPane === 'output'}
+              isViewingRemote={isViewingRemote}
+              remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+              remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
             />
             <RightPanel
               selectedTask={selectedTask}
@@ -2215,6 +2321,9 @@ export function RunApp({
               currentModel={displayAgentInfo.model}
               promptPreview={promptPreview}
               templateSource={templateSource}
+              isViewingRemote={isViewingRemote}
+              remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+              remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
             />
             {/* Subagent Tree Panel - shown on right side when toggled with 'T' key */}
             {subagentPanelVisible && (
@@ -2252,6 +2361,9 @@ export function RunApp({
               currentModel={displayAgentInfo.model}
               promptPreview={promptPreview}
               templateSource={templateSource}
+              isViewingRemote={isViewingRemote}
+              remoteConnectionStatus={instanceTabs?.[selectedTabIndex]?.status}
+              remoteAlias={instanceTabs?.[selectedTabIndex]?.alias}
             />
             {/* Subagent Tree Panel - shown on right side when toggled with 'T' key */}
             {subagentPanelVisible && (
@@ -2412,6 +2524,76 @@ export function RunApp({
             }
           }
         }}
+      />
+
+      {/* Remote Management Overlay (add/edit/delete) */}
+      <RemoteManagementOverlay
+        visible={showRemoteManagement}
+        mode={remoteManagementMode}
+        existingRemote={editingRemote}
+        onSave={async (data) => {
+          if (!instanceManager) {
+            throw new Error('Instance manager not available');
+          }
+
+          if (remoteManagementMode === 'add') {
+            // Add new remote to config
+            const result = await addRemote(data.alias, data.host, data.port, data.token);
+            if (!result.success) {
+              throw new Error(result.error || 'Failed to add remote');
+            }
+            // Connect to the new remote via InstanceManager
+            await instanceManager.addAndConnectRemote(data.alias, data.host, data.port, data.token);
+            // Select the new tab
+            const newIndex = instanceManager.getTabIndexByAlias(data.alias);
+            if (newIndex !== -1 && onSelectTab) {
+              onSelectTab(newIndex);
+            }
+          } else {
+            // Edit existing remote
+            // If alias changed, we need to remove old and add new
+            if (editingRemote && editingRemote.alias !== data.alias) {
+              // Remove old config
+              await removeRemote(editingRemote.alias);
+              // Remove old tab
+              instanceManager.removeTab(editingRemote.alias);
+              // Add new config
+              const result = await addRemote(data.alias, data.host, data.port, data.token);
+              if (!result.success) {
+                throw new Error(result.error || 'Failed to add remote');
+              }
+              // Connect with new alias
+              await instanceManager.addAndConnectRemote(data.alias, data.host, data.port, data.token);
+            } else {
+              // Same alias - just update config and reconnect
+              await removeRemote(data.alias);
+              const result = await addRemote(data.alias, data.host, data.port, data.token);
+              if (!result.success) {
+                throw new Error(result.error || 'Failed to update remote');
+              }
+              await instanceManager.reconnectRemote(data.alias, data.host, data.port, data.token);
+            }
+          }
+          setShowRemoteManagement(false);
+        }}
+        onDelete={async (alias) => {
+          if (!instanceManager) {
+            throw new Error('Instance manager not available');
+          }
+          // Remove from config
+          const result = await removeRemote(alias);
+          if (!result.success) {
+            throw new Error(result.error || 'Failed to remove remote');
+          }
+          // Remove tab and disconnect
+          instanceManager.removeTab(alias);
+          // Switch to local tab (index 0)
+          if (onSelectTab) {
+            onSelectTab(0);
+          }
+          setShowRemoteManagement(false);
+        }}
+        onClose={() => setShowRemoteManagement(false)}
       />
     </box>
   );

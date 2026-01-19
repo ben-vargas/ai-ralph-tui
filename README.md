@@ -150,6 +150,9 @@ ralph-tui create-prd --output ./docs
 | `?` | Show help |
 | `1-9` | Switch to tab 1-9 (remote instances) |
 | `[` / `]` | Previous/Next tab |
+| `a` | Add new remote instance |
+| `e` | Edit current remote (when viewing remote tab) |
+| `x` | Delete current remote (when viewing remote tab) |
 
 See the [full CLI reference](https://ralph-tui.com/docs/cli/overview) for all options.
 
