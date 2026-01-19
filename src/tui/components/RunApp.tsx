@@ -1112,8 +1112,10 @@ export function RunApp({
   // Navigate through subagent tree with j/k keys
   // Builds a flattened list of all nodes (task root + subagents) and moves selection
   const navigateSubagentTree = useCallback((direction: 1 | -1) => {
-    // Root node ID: currentTaskId if available, otherwise 'main' for backwards compat
-    const rootNodeId = currentTaskId || 'main';
+    // Use the appropriate tree based on whether viewing remote
+    const tree = isViewingRemote ? remoteSubagentTree : subagentTree;
+    // Root node ID: displayCurrentTaskId if available, otherwise 'main' for backwards compat
+    const rootNodeId = displayCurrentTaskId || 'main';
     // Build flat list: [rootNodeId, ...all subagent IDs in tree order]
     const flatList: string[] = [rootNodeId];
 
@@ -1123,13 +1125,13 @@ export function RunApp({
         traverse(node.children);
       }
     }
-    traverse(subagentTree);
+    traverse(tree);
 
     // Find current index and move
     const currentIdx = flatList.indexOf(selectedSubagentId);
     const newIdx = Math.max(0, Math.min(flatList.length - 1, currentIdx + direction));
     setSelectedSubagentId(flatList[newIdx]!);
-  }, [subagentTree, selectedSubagentId, currentTaskId]);
+  }, [subagentTree, remoteSubagentTree, isViewingRemote, selectedSubagentId, displayCurrentTaskId]);
 
   // Handle keyboard navigation
   const handleKeyboard = useCallback(
@@ -1721,7 +1723,9 @@ export function RunApp({
       : selectedTask?.id;
 
     // Check if we're viewing the currently executing task
-    const isViewingCurrentTask = effectiveTaskId === currentTaskId;
+    // For remote instances, compare against remoteCurrentTaskId
+    const activeTaskId = isViewingRemote ? remoteCurrentTaskId : currentTaskId;
+    const isViewingCurrentTask = effectiveTaskId === activeTaskId;
 
     // Check if task root is selected (effectiveTaskId or 'main' for backwards compat)
     const isTaskRootSelected = selectedSubagentId === effectiveTaskId || selectedSubagentId === 'main';
@@ -1741,10 +1745,54 @@ export function RunApp({
       return undefined;
     }
 
-    // Find subagent state from tree
-    const subagentNode = findSubagentNode(subagentTree, selectedSubagentId);
+    // Use appropriate tree based on whether viewing remote
+    const tree = isViewingRemote ? remoteSubagentTree : subagentTree;
 
-    // Try to get subagent-specific output from engine (returns tool result content)
+    // Find subagent state from tree
+    const subagentNode = findSubagentNode(tree, selectedSubagentId);
+
+    // For remote instances, we can only show info from the tree node
+    // (subagent output/details APIs are local-only)
+    if (isViewingRemote) {
+      if (subagentNode) {
+        const { state } = subagentNode;
+        const lines: string[] = [];
+        lines.push(`═══ [${state.type}] ${state.description} ═══`);
+        lines.push('');
+
+        // Status and timing
+        const statusLine = `Status: ${state.status}`;
+        const durationLine = state.durationMs
+          ? `  |  Duration: ${state.durationMs < 1000 ? `${state.durationMs}ms` : `${Math.round(state.durationMs / 1000)}s`}`
+          : '';
+        lines.push(statusLine + durationLine);
+
+        // Child subagents
+        if (state.children.length > 0) {
+          lines.push(`Child subagents: ${state.children.length}`);
+        }
+
+        lines.push('');
+
+        // Status message
+        if (state.status === 'running') {
+          lines.push('─── Status ───');
+          lines.push('Subagent is currently running...');
+        } else if (state.status === 'completed') {
+          lines.push('─── Info ───');
+          lines.push('Detailed subagent output not available for remote instances.');
+          lines.push('View the main task output for full iteration results.');
+        } else if (state.status === 'error') {
+          lines.push('─── Error ───');
+          lines.push('Subagent encountered an error');
+        }
+
+        return lines.join('\n');
+      }
+      return `[Subagent ${selectedSubagentId}]\nNo output available for remote instance`;
+    }
+
+    // Local instance: get subagent-specific output from engine
     const subagentOutput = engine.getSubagentOutput(selectedSubagentId);
 
     // Build rich output based on subagent state
@@ -1810,7 +1858,7 @@ export function RunApp({
     }
 
     return `[Subagent ${selectedSubagentId}]\nNo output available`;
-  }, [selectedSubagentId, currentTaskId, selectedTask?.id, selectedIteration?.task?.id, viewMode, selectedTaskIteration.output, engine, subagentTree]);
+  }, [selectedSubagentId, currentTaskId, remoteCurrentTaskId, selectedTask?.id, selectedIteration?.task?.id, viewMode, selectedTaskIteration.output, engine, subagentTree, remoteSubagentTree, isViewingRemote]);
 
   // Compute historic agent/model for display when viewing completed iterations
   // Falls back to current values if viewing a live iteration or no historic data available
