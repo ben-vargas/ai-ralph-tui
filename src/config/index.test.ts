@@ -712,7 +712,7 @@ describe('validateConfig', () => {
     expect(result.warnings.some((w) => w.includes('epic'))).toBe(true);
   });
 
-  test('reports error for json tracker without prdPath', async () => {
+  test('reports warning for json tracker without prdPath (TUI will prompt)', async () => {
     const config: RalphConfig = {
       agent: { name: 'claude', plugin: 'claude', options: {} },
       tracker: { name: 'json', plugin: 'json', options: {} },
@@ -730,9 +730,10 @@ describe('validateConfig', () => {
       },
     };
 
+    // Now valid - TUI will show file prompt dialog instead of erroring
     const result = await validateConfig(config);
-    expect(result.valid).toBe(false);
-    expect(result.errors.some((e) => e.includes('PRD'))).toBe(true);
+    expect(result.valid).toBe(true);
+    expect(result.warnings.some((w) => w.includes('PRD') || w.includes('prd'))).toBe(true);
   });
 });
 
