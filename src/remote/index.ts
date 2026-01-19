@@ -8,3 +8,5 @@ export * from './token.js';
 export * from './audit.js';
 export * from './server.js';
 export * from './config.js';
+export * from './client.js';
+export * from './instance-manager.js';

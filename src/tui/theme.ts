@@ -97,6 +97,8 @@ export const keyboardShortcuts = [
   { key: 'o', description: 'Cycle Views' },
   { key: 'O', description: 'Prompt' },
   { key: 't', description: 'Trace' },
+  { key: '1-9', description: 'Switch Tab' },
+  { key: '[]', description: 'Prev/Next Tab' },
   { key: '↑↓', description: 'Navigate' },
   { key: '?', description: 'Help' },
 ] as const;
@@ -125,6 +127,11 @@ export const fullKeyboardShortcuts = [
   { key: '↑ / k', description: 'Move selection up', category: 'Navigation' },
   { key: '↓ / j', description: 'Move selection down', category: 'Navigation' },
   { key: 'Enter', description: 'View selected item details', category: 'Navigation' },
+  { key: '1-9', description: 'Switch to tab by number', category: 'Instances' },
+  { key: '[', description: 'Previous tab', category: 'Instances' },
+  { key: ']', description: 'Next tab', category: 'Instances' },
+  { key: 'Ctrl+Tab', description: 'Next tab (alternate)', category: 'Instances' },
+  { key: 'Ctrl+Shift+Tab', description: 'Previous tab (alternate)', category: 'Instances' },
   { key: 'Ctrl+C', description: 'Interrupt (with confirmation)', category: 'System' },
   { key: 'Ctrl+C ×2', description: 'Force quit immediately', category: 'System' },
 ] as const;
@@ -133,6 +140,10 @@ export const fullKeyboardShortcuts = [
  * Layout dimensions
  */
 export const layout = {
+  tabBar: {
+    // Tab bar for instance navigation
+    height: 1,
+  },
   header: {
     // Compact single-line header (no border)
     height: 1,

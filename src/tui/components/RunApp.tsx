@@ -25,6 +25,8 @@ import { SettingsView } from './SettingsView.js';
 import { EpicLoaderOverlay } from './EpicLoaderOverlay.js';
 import type { EpicLoaderMode } from './EpicLoaderOverlay.js';
 import { SubagentTreePanel } from './SubagentTreePanel.js';
+import { TabBar } from './TabBar.js';
+import type { InstanceTab } from '../../remote/client.js';
 import type {
   ExecutionEngine,
   EngineEvent,
@@ -111,6 +113,14 @@ export interface RunAppProps {
   sandboxConfig?: SandboxConfig;
   /** Resolved sandbox mode (when mode is 'auto', this shows what it resolved to) */
   resolvedSandboxMode?: Exclude<SandboxMode, 'auto'>;
+  /** Instance tabs for remote navigation (local first, then remotes) */
+  instanceTabs?: InstanceTab[];
+  /** Currently selected instance tab index */
+  selectedTabIndex?: number;
+  /** Callback when a tab is selected */
+  onSelectTab?: (index: number) => void;
+  /** Callback when "+" is clicked to add a new remote */
+  onAddRemote?: () => void;
 }
 
 /**
@@ -317,6 +327,10 @@ export function RunApp({
   currentModel,
   sandboxConfig,
   resolvedSandboxMode,
+  instanceTabs,
+  selectedTabIndex = 0,
+  onSelectTab,
+  onAddRemote,
 }: RunAppProps): ReactNode {
   const { width, height } = useTerminalDimensions();
   const renderer = useRenderer();
@@ -1166,18 +1180,52 @@ export function RunApp({
             }
           }
           break;
+
+        // Tab navigation: number keys 1-9 to switch tabs
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          if (instanceTabs && onSelectTab) {
+            const tabIndex = parseInt(key.name, 10) - 1;
+            if (tabIndex < instanceTabs.length) {
+              onSelectTab(tabIndex);
+            }
+          }
+          break;
+
+        // Tab navigation: [ and ] to cycle tabs
+        case '[':
+          if (instanceTabs && onSelectTab && instanceTabs.length > 1) {
+            const prevIndex = (selectedTabIndex - 1 + instanceTabs.length) % instanceTabs.length;
+            onSelectTab(prevIndex);
+          }
+          break;
+
+        case ']':
+          if (instanceTabs && onSelectTab && instanceTabs.length > 1) {
+            const nextIndex = (selectedTabIndex + 1) % instanceTabs.length;
+            onSelectTab(nextIndex);
+          }
+          break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showEpicLoader, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab]
   );
 
   useKeyboard(handleKeyboard);
 
-  // Calculate layout - account for dashboard height when visible
+  // Calculate layout - account for dashboard and tab bar height when visible
   const dashboardHeight = showDashboard ? layout.progressDashboard.height : 0;
+  const tabBarHeight = instanceTabs && instanceTabs.length > 1 ? layout.tabBar.height : 0;
   const contentHeight = Math.max(
     1,
-    height - layout.header.height - layout.footer.height - dashboardHeight
+    height - layout.header.height - layout.footer.height - dashboardHeight - tabBarHeight
   );
   const isCompact = width < 80;
 
@@ -1560,6 +1608,16 @@ export function RunApp({
         backgroundColor: colors.bg.primary,
       }}
     >
+      {/* Tab Bar - instance navigation (local + remotes) */}
+      {instanceTabs && instanceTabs.length > 1 && (
+        <TabBar
+          tabs={instanceTabs}
+          selectedIndex={selectedTabIndex}
+          onSelectTab={onSelectTab}
+          onAddRemote={onAddRemote}
+        />
+      )}
+
       {/* Header - compact design showing essential info + agent/tracker + fallback status */}
       <Header
         status={status}
