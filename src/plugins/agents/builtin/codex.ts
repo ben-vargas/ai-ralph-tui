@@ -42,10 +42,12 @@ function extractErrorMessage(err: unknown): string {
  * Parse Codex JSON line into standardized display events.
  * Returns AgentDisplayEvent[] - the shared processAgentEvents decides what to show.
  *
- * Codex event types (when using --json flag):
- * - "message": Text output from the LLM (contains content array)
- * - "function_call": Tool/function being called
- * - "function_call_output": Tool execution result
+ * Codex CLI event types (when using --json flag):
+ * - "thread.started": Session started (skip)
+ * - "turn.started": Turn started (skip)
+ * - "item.started": Item starting - can be todo_list, command_execution, agent_message
+ * - "item.completed": Item finished - extract text from agent_message
+ * - "turn.completed": Turn finished with usage stats (skip)
  * - "error": Error from Codex
  */
 function parseCodexJsonLine(jsonLine: string): AgentDisplayEvent[] {
@@ -55,49 +57,43 @@ function parseCodexJsonLine(jsonLine: string): AgentDisplayEvent[] {
     const event = JSON.parse(jsonLine);
     const events: AgentDisplayEvent[] = [];
 
-    // Codex uses different event structures - handle common patterns
-    if (event.type === 'message' || event.message) {
-      // IMPORTANT: Skip user messages - they echo the input prompt
-      if (event.role === 'user') {
-        return [];
+    // Handle Codex CLI's actual event types
+    if (event.type === 'item.completed' || event.type === 'item.started') {
+      const item = event.item;
+      if (!item) return [];
+
+      // Agent message - extract text
+      if (item.type === 'agent_message' && item.text) {
+        events.push({ type: 'text', content: item.text });
       }
-      // Message event with content array (assistant responses)
-      const content = event.content || event.message?.content;
-      if (Array.isArray(content)) {
-        for (const part of content) {
-          if (part.type === 'text' && part.text) {
-            events.push({ type: 'text', content: part.text });
-          } else if (part.type === 'tool_use' || part.type === 'function_call') {
-            const toolName = part.name || part.function?.name || 'unknown';
-            const toolInput = part.input || part.function?.arguments;
-            events.push({ type: 'tool_use', name: toolName, input: toolInput });
+      // Command execution - show as tool use
+      else if (item.type === 'command_execution') {
+        if (event.type === 'item.started' && item.command) {
+          events.push({ type: 'tool_use', name: 'shell', input: { command: item.command } });
+        } else if (event.type === 'item.completed') {
+          const isError = item.exit_code !== 0 && item.exit_code !== null;
+          if (isError && item.aggregated_output) {
+            events.push({ type: 'error', message: item.aggregated_output.slice(0, 500) });
           }
+          events.push({ type: 'tool_result' });
         }
-      } else if (typeof content === 'string') {
-        events.push({ type: 'text', content });
       }
-    } else if (event.type === 'function_call' || event.function_call) {
-      // Function call event
-      const call = event.function_call || event;
-      const toolName = call.name || call.function?.name || 'unknown';
-      const toolInput = call.arguments || call.input;
-      events.push({ type: 'tool_use', name: toolName, input: toolInput });
-    } else if (event.type === 'function_call_output' || event.type === 'tool_result') {
-      // Function result
-      const isError = event.is_error === true || event.error !== undefined;
-      if (isError) {
-        const errMsg = extractErrorMessage(event.error);
-        events.push({ type: 'error', message: errMsg || 'tool execution failed' });
+      // File operations
+      else if (item.type === 'file_edit' || item.type === 'file_write' || item.type === 'file_read') {
+        if (event.type === 'item.started') {
+          const filePath = item.file_path || item.path || 'unknown';
+          events.push({ type: 'tool_use', name: item.type, input: { path: filePath } });
+        } else {
+          events.push({ type: 'tool_result' });
+        }
       }
-      events.push({ type: 'tool_result' });
-    } else if (event.type === 'text' && event.text) {
-      // Simple text event
-      events.push({ type: 'text', content: event.text });
-    } else if (event.type === 'error' || event.error) {
-      // Error event
+    }
+    // Error events
+    else if (event.type === 'error' || event.error) {
       const errorMsg = extractErrorMessage(event.error) || extractErrorMessage(event.message) || 'Unknown error';
       events.push({ type: 'error', message: errorMsg });
     }
+    // Skip: thread.started, turn.started, turn.completed (no displayable content)
 
     return events;
   } catch {
