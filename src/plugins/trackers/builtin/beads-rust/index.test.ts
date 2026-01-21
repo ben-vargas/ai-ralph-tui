@@ -159,13 +159,24 @@ describe('BeadsRustTrackerPlugin', () => {
       expect(mockSpawnArgs[0]?.args).toEqual(['list', '--json', '--all']);
     });
 
-    test('supports --parent filtering', async () => {
+    test('supports --parent filtering via in-memory filtering', async () => {
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
+        // First: br list --json --all (returns all tasks)
         {
           exitCode: 0,
           stdout: JSON.stringify([
             { id: 'epic.1', title: 'Child', status: 'open', priority: 0 },
+            { id: 'other.1', title: 'Other', status: 'open', priority: 0 },
+          ]),
+        },
+        // Second: br show epic --json (returns parent with children list)
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'epic', title: 'Parent', status: 'open', priority: 0, dependents: [
+              { id: 'epic.1', title: 'Child', status: 'open', dependency_type: 'parent-child' }
+            ] },
           ]),
         },
       ];
@@ -174,15 +185,15 @@ describe('BeadsRustTrackerPlugin', () => {
       await plugin.initialize({ workingDir: '/test' });
       mockSpawnArgs = [];
 
-      await plugin.getTasks({ parentId: 'epic' });
+      const tasks = await plugin.getTasks({ parentId: 'epic' });
 
-      expect(mockSpawnArgs[0]?.args).toEqual([
-        'list',
-        '--json',
-        '--all',
-        '--parent',
-        'epic',
-      ]);
+      // Should call list first, then show to get children
+      expect(mockSpawnArgs[0]?.args).toEqual(['list', '--json', '--all']);
+      expect(mockSpawnArgs[1]?.args).toEqual(['show', 'epic', '--json']);
+
+      // Should only return child tasks
+      expect(tasks.length).toBe(1);
+      expect(tasks[0]?.id).toBe('epic.1');
     });
 
     test('supports --label filtering', async () => {
@@ -462,10 +473,21 @@ describe('BeadsRustTrackerPlugin', () => {
     test('executes br ready --json and supports filters', async () => {
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
+        // First: br ready with filters
         {
           exitCode: 0,
           stdout: JSON.stringify([
             { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
+            { id: 't2', title: 'Other Task', status: 'open', priority: 1 },
+          ]),
+        },
+        // Second: br show epic to get children IDs (for filtering)
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'epic', title: 'Parent', status: 'open', priority: 0, dependents: [
+              { id: 't1', title: 'Task 1', status: 'open', dependency_type: 'parent-child' }
+            ] },
           ]),
         },
       ];
@@ -474,7 +496,7 @@ describe('BeadsRustTrackerPlugin', () => {
       await plugin.initialize({ workingDir: '/test' });
       mockSpawnArgs = [];
 
-      await plugin.getNextTask({
+      const task = await plugin.getNextTask({
         limit: 25,
         parentId: 'epic',
         labels: ['a', 'b'],
@@ -482,15 +504,14 @@ describe('BeadsRustTrackerPlugin', () => {
         assignee: 'alice',
       });
 
-      expect(mockSpawnArgs.length).toBe(1);
-      expect(mockSpawnArgs[0]?.cmd).toBe('br');
+      // First call: ready with filters (no --parent since br doesn't support it)
       expect(mockSpawnArgs[0]?.args).toEqual([
         'ready',
         '--json',
         '--limit',
         '25',
-        '--parent',
-        'epic',
+        '--type',
+        'task',
         '--label',
         'a,b',
         '--priority',
@@ -498,6 +519,10 @@ describe('BeadsRustTrackerPlugin', () => {
         '--assignee',
         'alice',
       ]);
+      // Second call: show epic to get children IDs (for in-memory filtering)
+      expect(mockSpawnArgs[1]?.args).toEqual(['show', 'epic', '--json']);
+      // Should only return child task
+      expect(task?.id).toBe('t1');
     });
 
     test('prefers in_progress tasks over open tasks', async () => {
@@ -791,15 +816,12 @@ describe('BeadsRustTrackerPlugin', () => {
               status: 'open',
               priority: 0,
               external_ref: 'prd:./tasks/prd.md',
+              dependents: [
+                { id: 'epic1.1', title: 'A', status: 'open', dependency_type: 'parent-child' },
+                { id: 'epic1.2', title: 'B', status: 'closed', dependency_type: 'parent-child' },
+                { id: 'epic1.3', title: 'C', status: 'cancelled', dependency_type: 'parent-child' },
+              ],
             },
-          ]),
-        },
-        {
-          exitCode: 0,
-          stdout: JSON.stringify([
-            { id: 'epic1.1', title: 'A', status: 'open', priority: 1 },
-            { id: 'epic1.2', title: 'B', status: 'closed', priority: 1 },
-            { id: 'epic1.3', title: 'C', status: 'cancelled', priority: 1 },
           ]),
         },
       ];
@@ -820,7 +842,6 @@ describe('BeadsRustTrackerPlugin', () => {
       expect(mockReadFilePaths).toEqual(['/test/tasks/prd.md']);
       expect(mockSpawnArgs.map((c) => c.args)).toEqual([
         ['show', 'epic1', '--json'],
-        ['list', '--json', '--all', '--parent', 'epic1'],
       ]);
     });
 
