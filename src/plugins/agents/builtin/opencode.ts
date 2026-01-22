@@ -286,7 +286,7 @@ export class OpenCodeAgentPlugin extends BaseAgentPlugin {
     return {
       // ~/.local/share/opencode contains auth.json with OAuth tokens
       authPaths: ['~/.opencode', '~/.config/opencode', '~/.local/share/opencode'],
-      binaryPaths: ['/usr/local/bin', '~/.local/bin', '~/go/bin'],
+      binaryPaths: ['/usr/local/bin', '~/.local/bin', '~/go/bin', '/opt/homebrew/bin'],
       runtimePaths: [],
       requiresNetwork: true,
     };
