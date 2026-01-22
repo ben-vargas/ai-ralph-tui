@@ -202,6 +202,7 @@ async function getAgent(agentName?: string): Promise<AgentPlugin | null> {
       name: targetAgent,
       plugin: targetAgent,
       options: storedConfig.agentOptions || {},
+      command: storedConfig.command,
     };
 
     // Get agent instance

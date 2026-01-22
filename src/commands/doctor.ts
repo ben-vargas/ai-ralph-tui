@@ -70,6 +70,7 @@ async function runDiagnostics(
       name: agentName,
       plugin: agentName,
       options: storedConfig.agentOptions ?? {},
+      command: storedConfig.command,
     });
   } catch (error) {
     return {
