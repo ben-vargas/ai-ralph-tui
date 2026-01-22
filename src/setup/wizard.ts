@@ -31,8 +31,9 @@ import {
 } from './prompts.js';
 import {
   listBundledSkills,
-  installSkill,
-  isSkillInstalled,
+  isSkillInstalledAt,
+  resolveSkillsPath,
+  installSkillsForAgent,
 } from './skill-installer.js';
 import { CURRENT_CONFIG_VERSION } from './migration.js';
 
@@ -339,44 +340,63 @@ export async function runSetupWizard(
     // === Step 4: Skills Installation ===
     printSection('AI Skills Installation');
 
-    const bundledSkills = await listBundledSkills();
+    // Get the selected agent's skills paths from the registry
+    const agentRegistry = getAgentRegistry();
+    const agentMeta = agentRegistry.getPluginMeta(selectedAgent);
+    const skillsPaths = agentMeta?.skillsPaths;
 
-    if (bundledSkills.length > 0) {
-      printInfo('Ralph TUI includes AI skills that enhance agent capabilities.');
-      printInfo('Installing skills ensures you have the latest versions.');
-      console.log();
-
-      for (const skill of bundledSkills) {
-        const alreadyInstalled = await isSkillInstalled(skill.name);
-        const actionLabel = alreadyInstalled ? 'Update' : 'Install';
-
-        const installThisSkill = await promptBoolean(
-          `${actionLabel} skill: ${skill.name}?`,
-          {
-            default: true,
-            help: alreadyInstalled
-              ? `${skill.description} (currently installed - update to latest)`
-              : skill.description,
-          }
-        );
-
-        if (installThisSkill) {
-          // Always use force to overwrite existing skills with latest version
-          const result = await installSkill(skill.name, { force: true });
-          if (result.success) {
-            printSuccess(`  ${alreadyInstalled ? 'Updated' : 'Installed'}: ${skill.name}`);
-            if (result.path) {
-              printInfo(`    Location: ${result.path}`);
-            }
-          } else {
-            printError(`  Failed to ${actionLabel.toLowerCase()} ${skill.name}: ${result.error}`);
-          }
-        } else if (alreadyInstalled) {
-          printInfo(`  ${skill.name}: Keeping existing version`);
-        }
-      }
+    if (!skillsPaths) {
+      printInfo(`Agent "${agentMeta?.name ?? selectedAgent}" does not support skill installation.`);
     } else {
-      printInfo('No bundled skills available for installation.');
+      const bundledSkills = await listBundledSkills();
+
+      if (bundledSkills.length > 0) {
+        const personalDir = resolveSkillsPath(skillsPaths.personal);
+        printInfo('Ralph TUI includes AI skills that enhance agent capabilities.');
+        printInfo(`Skills will be installed to: ${personalDir}`);
+        console.log();
+
+        for (const skill of bundledSkills) {
+          const alreadyInstalled = await isSkillInstalledAt(skill.name, personalDir);
+          const actionLabel = alreadyInstalled ? 'Update' : 'Install';
+
+          const installThisSkill = await promptBoolean(
+            `${actionLabel} skill: ${skill.name}?`,
+            {
+              default: true,
+              help: alreadyInstalled
+                ? `${skill.description} (currently installed - update to latest)`
+                : skill.description,
+            }
+          );
+
+          if (installThisSkill) {
+            const result = await installSkillsForAgent(
+              selectedAgent,
+              agentMeta?.name ?? selectedAgent,
+              skillsPaths,
+              { force: true, personal: true, repo: false, skillName: skill.name }
+            );
+
+            // Report results from the agent-specific installation
+            const skillResults = result.skills.get(skill.name);
+            const personalResult = skillResults?.find(r => r.target === 'personal');
+            if (personalResult?.result.success) {
+              printSuccess(`  ${alreadyInstalled ? 'Updated' : 'Installed'}: ${skill.name}`);
+              if (personalResult.result.path) {
+                printInfo(`    Location: ${personalResult.result.path}`);
+              }
+            } else {
+              const error = personalResult?.result.error ?? 'Unknown error';
+              printError(`  Failed to ${actionLabel.toLowerCase()} ${skill.name}: ${error}`);
+            }
+          } else if (alreadyInstalled) {
+            printInfo(`  ${skill.name}: Keeping existing version`);
+          }
+        }
+      } else {
+        printInfo('No bundled skills available for installation.');
+      }
     }
 
     // === Save Configuration ===
@@ -404,7 +424,6 @@ export async function runSetupWizard(
     console.log();
 
     // Get a fresh agent instance with the configured options
-    const agentRegistry = getAgentRegistry();
     const agentInstance = await agentRegistry.getInstance({
       name: selectedAgent,
       plugin: selectedAgent,

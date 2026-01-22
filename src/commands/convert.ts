@@ -134,6 +134,7 @@ Options:
   --branch, -b <name>    Git branch name (prompts if not provided)
   --labels, -l <labels>  Labels to apply (comma-separated, beads format only)
                          Default: uses labels from config.toml [trackerOptions].labels
+                         Note: "ralph" is always included for beads format
   --force, -f            Overwrite existing files without prompting
   --verbose, -v          Show detailed parsing output
   --help, -h             Show this help message
@@ -153,7 +154,7 @@ Description:
     - Creates an epic bead for the feature
     - Creates child beads for each user story
     - Sets up dependencies based on story order or explicit deps
-    - Applies configured labels from config.toml or --labels flag
+    - Applies the 'ralph' label plus any configured/CLI labels
     - Runs bd sync after creation
     - Displays all created bead IDs
 
@@ -238,8 +239,9 @@ async function convertToBeads(
 ): Promise<BeadsConversionResult> {
   const storyIds: string[] = [];
 
-  // Use provided labels (from CLI or config)
-  const labelsStr = labels.length > 0 ? labels.join(',') : '';
+  // Ensure 'ralph' label is always included
+  const allLabels = ['ralph', ...labels.filter((l) => l !== 'ralph')];
+  const labelsStr = allLabels.join(',');
 
   // Step 1: Create the epic bead
   printInfo('Creating epic bead...');
@@ -248,14 +250,10 @@ async function convertToBeads(
     '--type', 'epic',
     '--title', parsed.name,
     '--description', parsed.description,
+    '--labels', labelsStr,
     '--priority', '1',
     '--silent',
   ];
-
-  // Only add labels if configured
-  if (labelsStr) {
-    epicArgs.splice(epicArgs.indexOf('--priority'), 0, '--labels', labelsStr);
-  }
 
   // Include PRD link if available
   if (prdPath) {
@@ -300,15 +298,11 @@ async function convertToBeads(
       '--type', 'task',
       '--title', `${story.id}: ${story.title}`,
       '--description', description,
+      '--labels', labelsStr,
       '--priority', String(story.priority),
       '--parent', epicId,
       '--silent',
     ];
-
-    // Only add labels if configured
-    if (labelsStr) {
-      storyArgs.splice(storyArgs.indexOf('--priority'), 0, '--labels', labelsStr);
-    }
 
     // Include PRD link if available
     if (prdPath) {

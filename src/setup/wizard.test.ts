@@ -46,8 +46,15 @@ mock.module('./prompts.js', () => ({
 // Mock skill-installer to avoid file system operations during tests
 mock.module('./skill-installer.js', () => ({
   listBundledSkills: () => Promise.resolve([]),
-  installSkill: () => Promise.resolve({ success: true }),
-  isSkillInstalled: () => Promise.resolve(false),
+  isSkillInstalledAt: () => Promise.resolve(false),
+  resolveSkillsPath: (p: string) => p.replace(/^~/, '/home/test'),
+  installSkillsForAgent: () => Promise.resolve({
+    agentId: 'claude',
+    agentName: 'Claude Code',
+    skills: new Map(),
+    hasInstalls: true,
+    allSkipped: false,
+  }),
 }));
 
 // Mock agent preflight to avoid timeouts in tests
@@ -72,6 +79,21 @@ mock.module('../plugins/agents/registry.js', () => ({
       { id: 'opencode', name: 'OpenCode', description: 'OpenCode AI', version: '1.0.0' },
       { id: 'droid', name: 'Droid', description: 'Factory Droid', version: '1.0.0' },
     ],
+    getPluginMeta: (id: string) => ({
+      id,
+      name: id === 'claude' ? 'Claude Code' : id,
+      description: `${id} AI`,
+      version: '1.0.0',
+      defaultCommand: id,
+      supportsStreaming: true,
+      supportsInterrupt: true,
+      supportsFileContext: true,
+      supportsSubagentTracing: true,
+      skillsPaths: {
+        personal: `~/.${id}/skills`,
+        repo: `.${id}/skills`,
+      },
+    }),
     createInstance: (id: string) => createMockAgentInstance(id, id),
     hasPlugin: (name: string) => ['claude', 'opencode', 'droid'].includes(name),
     // Mock registerBuiltin to prevent errors when registerBuiltinAgents is called
