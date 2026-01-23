@@ -69,6 +69,21 @@ export function findCommandPath(
   });
 }
 
+/**
+ * Quote a command path for Windows shell execution.
+ * When spawn is used with shell: true on Windows, paths containing spaces
+ * must be wrapped in double quotes to prevent cmd.exe from splitting them
+ * at the space (e.g., "C:\Program Files\..." would be parsed as "C:\Program").
+ * Returns the path unchanged if it has no spaces or is already quoted.
+ * Callers should only use this when shell: true is set on Windows.
+ */
+export function quoteForWindowsShell(commandPath: string): string {
+  if (!commandPath.includes(' ')) return commandPath;
+  // Already quoted
+  if (commandPath.startsWith('"') && commandPath.endsWith('"')) return commandPath;
+  return `"${commandPath}"`;
+}
+
 import { randomUUID } from 'node:crypto';
 import type {
   AgentPlugin,
@@ -329,7 +344,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     const command = this.commandPath ?? this.meta.defaultCommand;
 
     return new Promise((resolve) => {
-      const proc = spawn(command, ['--version'], {
+      const isWindows = platform() === 'win32';
+      const spawnCmd = isWindows ? quoteForWindowsShell(command) : command;
+      const proc = spawn(spawnCmd, ['--version'], {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: true,
       });
@@ -466,7 +483,8 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
       // On Unix, shell: false avoids shell interpretation of special characters in args
       // The prompt will be passed via stdin if getStdinInput returns content
       const isWindows = platform() === 'win32';
-      const proc = spawn(spawnCommand, spawnArgs, {
+      const quotedCommand = isWindows ? quoteForWindowsShell(spawnCommand) : spawnCommand;
+      const proc = spawn(quotedCommand, spawnArgs, {
         cwd: options?.cwd ?? process.cwd(),
         env,
         stdio: ['pipe', 'pipe', 'pipe'],
