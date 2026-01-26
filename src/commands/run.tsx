@@ -698,6 +698,8 @@ interface RunAppWrapperProps {
   trackerType?: string;
   /** Agent plugin name (from resolved config, includes CLI override) */
   agentPlugin?: string;
+  /** Custom command path for the agent (if configured) */
+  agentCommand?: string;
   /** Current epic ID for highlighting */
   currentEpicId?: string;
   /** Initial subagent panel visibility (from persisted session) */
@@ -729,6 +731,7 @@ function RunAppWrapper({
   cwd = process.cwd(),
   trackerType,
   agentPlugin,
+  agentCommand,
   currentEpicId: initialEpicId,
   initialSubagentPanelVisible = false,
   onUpdatePersistedState,
@@ -895,6 +898,7 @@ function RunAppWrapper({
       onFilePathSwitch={handleFilePathSwitch}
       trackerType={trackerType}
       agentPlugin={agentPlugin}
+      agentCommand={agentCommand}
       currentEpicId={currentEpicId}
       initialSubagentPanelVisible={initialSubagentPanelVisible}
       onSubagentPanelVisibilityChange={handleSubagentPanelVisibilityChange}
@@ -1132,6 +1136,7 @@ async function runWithTui(
       cwd={config.cwd}
       trackerType={config.tracker.plugin}
       agentPlugin={config.agent.plugin}
+      agentCommand={config.agent.command}
       currentEpicId={config.epicId}
       initialSubagentPanelVisible={persistedState.subagentPanelVisible ?? false}
       onUpdatePersistedState={handleUpdatePersistedState}
