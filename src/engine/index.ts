@@ -42,7 +42,7 @@ import {
   openCodeTaskToClaudeMessages,
 } from '../plugins/agents/opencode/outputParser.js';
 import { updateSessionIteration, updateSessionStatus, updateSessionMaxIterations } from '../session/index.js';
-import { saveIterationLog, buildSubagentTrace, createProgressEntry, appendProgress, getRecentProgressSummary, getCodebasePatternsForPrompt } from '../logs/index.js';
+import { saveIterationLog, buildSubagentTrace, getRecentProgressSummary, getCodebasePatternsForPrompt } from '../logs/index.js';
 import { performAutoCommit } from './auto-commit.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
@@ -1066,15 +1066,6 @@ export class ExecutionEngine {
         sandboxConfig: this.config.sandbox,
       });
 
-      // Append progress entry for cross-iteration context
-      // This provides agents with history of what's been done
-      try {
-        const progressEntry = createProgressEntry(result);
-        await appendProgress(this.config.cwd, progressEntry);
-      } catch {
-        // Don't fail iteration if progress append fails
-      }
-
       this.emit({
         type: 'iteration:completed',
         timestamp: endedAt.toISOString(),
@@ -1102,14 +1093,6 @@ export class ExecutionEngine {
         startedAt: startedAt.toISOString(),
         endedAt: endedAt.toISOString(),
       };
-
-      // Append progress entry for failed iterations too
-      try {
-        const progressEntry = createProgressEntry(failedResult);
-        await appendProgress(this.config.cwd, progressEntry);
-      } catch {
-        // Don't fail iteration if progress append fails
-      }
 
       return failedResult;
     } finally {

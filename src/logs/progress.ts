@@ -1,254 +1,16 @@
 /**
- * ABOUTME: Progress file management for cross-iteration context.
- * Maintains a progress.md file that accumulates notes from each iteration,
- * providing context for subsequent agent runs about what's been done.
+ * ABOUTME: Progress file reading utilities for cross-iteration context.
+ * Reads progress.md (written by agents) to provide context for subsequent
+ * agent runs about what's been done.
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import type { IterationResult } from '../engine/types.js';
 
 /**
  * Default path for the progress file (relative to cwd).
  */
 export const PROGRESS_FILE = '.ralph-tui/progress.md';
-
-/**
- * Maximum size for the progress file before truncating old entries.
- * 50KB should provide plenty of context without bloating prompts.
- */
-const MAX_PROGRESS_SIZE = 50_000;
-
-/**
- * Patterns to extract notable content from agent output.
- */
-const INSIGHT_PATTERN = /`?★ Insight[─\s]*`?\n([\s\S]*?)\n`?─+`?/gi;
-const COMPLETION_NOTES_PATTERN = /<promise>\s*COMPLETE\s*<\/promise>/i;
-
-/**
- * Entry for a single iteration in the progress file.
- */
-export interface ProgressEntry {
-  iteration: number;
-  taskId: string;
-  taskTitle: string;
-  completed: boolean;
-  timestamp: string;
-  durationMs: number;
-  notes?: string;
-  insights?: string[];
-  error?: string;
-  /** Git commit hash after successful completion */
-  commitHash?: string;
-  /** Files changed in this iteration */
-  filesChanged?: string[];
-}
-
-/**
- * Extract insights from agent output.
- * Looks for ★ Insight blocks commonly used in educational output style.
- */
-function extractInsights(output: string): string[] {
-  const insights: string[] = [];
-  let match;
-
-  // Reset regex state
-  INSIGHT_PATTERN.lastIndex = 0;
-
-  while ((match = INSIGHT_PATTERN.exec(output)) !== null) {
-    const insight = match[1]?.trim();
-    if (insight && insight.length > 10) {
-      insights.push(insight);
-    }
-  }
-
-  return insights;
-}
-
-/**
- * Check if a line looks like tool output that should be filtered from notes.
- * This includes Read tool output (line numbers), XML markers, and other artifacts.
- */
-function isToolOutputLine(line: string): boolean {
-  const trimmed = line.trim();
-  if (!trimmed) return true; // Filter empty lines
-
-  // Read tool output: line numbers like "00001|" or "  123|" at start
-  if (/^\s*\d{3,6}\|/.test(trimmed)) return true;
-
-  // File content markers and XML-like tags from tool results
-  if (/^<\/?(?:file|function_results|system-reminder)/.test(trimmed)) return true;
-
-  // Lines that are just closing XML tags
-  if (/^<\/\w+>$/.test(trimmed)) return true;
-
-  // Lines that look like raw code artifacts (common patterns from Read output)
-  // e.g., lines that are just punctuation like "}", "});", "|", etc.
-  if (/^[}\]);|]+$/.test(trimmed)) return true;
-
-  return false;
-}
-
-/**
- * Extract completion notes - text immediately before <promise>COMPLETE</promise>.
- * Agents often summarize what was done right before the completion marker.
- * Filters out tool output (like Read tool line numbers) to get meaningful notes.
- */
-function extractCompletionNotes(output: string): string | undefined {
-  const match = output.match(COMPLETION_NOTES_PATTERN);
-  if (!match) return undefined;
-
-  // Get text before the completion marker (last ~500 chars)
-  const beforeComplete = output.slice(0, match.index);
-  const lastSection = beforeComplete.slice(-500).trim();
-
-  // Filter out tool output lines and keep meaningful content
-  const lines = lastSection.split('\n').filter((l) => !isToolOutputLine(l));
-
-  // Get last 5 meaningful lines before completion
-  const relevantLines = lines.slice(-5);
-
-  if (relevantLines.length > 0) {
-    return relevantLines.join('\n');
-  }
-
-  return undefined;
-}
-
-/**
- * Format a progress entry as markdown.
- */
-function formatProgressEntry(entry: ProgressEntry): string {
-  const lines: string[] = [];
-  const status = entry.completed ? '✓' : '✗';
-  const duration = Math.round(entry.durationMs / 1000);
-
-  lines.push(`## ${status} Iteration ${entry.iteration} - ${entry.taskId}: ${entry.taskTitle}`);
-  lines.push(`*${entry.timestamp} (${duration}s)*`);
-  if (entry.commitHash) {
-    lines.push(`**Commit:** ${entry.commitHash}`);
-  }
-  lines.push('');
-
-  if (entry.completed) {
-    lines.push('**Status:** Completed');
-  } else {
-    lines.push('**Status:** Failed/Incomplete');
-  }
-
-  if (entry.error) {
-    lines.push('');
-    lines.push('**Error:**');
-    lines.push(entry.error);
-  }
-
-  if (entry.filesChanged && entry.filesChanged.length > 0) {
-    lines.push('');
-    lines.push('**Files Changed:**');
-    for (const file of entry.filesChanged.slice(0, 10)) {
-      lines.push(`- ${file}`);
-    }
-    if (entry.filesChanged.length > 10) {
-      lines.push(`- ... and ${entry.filesChanged.length - 10} more`);
-    }
-  }
-
-  if (entry.notes) {
-    lines.push('');
-    lines.push('**Notes:**');
-    lines.push(entry.notes);
-  }
-
-  if (entry.insights && entry.insights.length > 0) {
-    lines.push('');
-    lines.push('**Insights:**');
-    for (const insight of entry.insights) {
-      lines.push(insight);
-    }
-  }
-
-  lines.push('');
-  lines.push('---');
-  lines.push('');
-
-  return lines.join('\n');
-}
-
-/**
- * Create a progress entry from an iteration result.
- */
-export function createProgressEntry(result: IterationResult): ProgressEntry {
-  const output = result.agentResult?.stdout ?? '';
-
-  return {
-    iteration: result.iteration,
-    taskId: result.task.id,
-    taskTitle: result.task.title,
-    completed: result.taskCompleted,
-    timestamp: new Date().toISOString(),
-    durationMs: result.durationMs ?? 0,
-    notes: extractCompletionNotes(output),
-    insights: extractInsights(output),
-    error: result.error,
-  };
-}
-
-/**
- * Append a progress entry to the progress file.
- * Creates the file if it doesn't exist.
- * Truncates old entries if file exceeds max size.
- */
-export async function appendProgress(
-  cwd: string,
-  entry: ProgressEntry
-): Promise<void> {
-  const filePath = join(cwd, PROGRESS_FILE);
-  const dirPath = dirname(filePath);
-
-  // Ensure directory exists
-  await mkdir(dirPath, { recursive: true });
-
-  // Read existing content
-  let existing = '';
-  try {
-    existing = await readFile(filePath, 'utf-8');
-  } catch {
-    // File doesn't exist yet - create with header
-    existing = `# Ralph Progress Log
-
-This file tracks progress across iterations. It's automatically updated
-after each iteration and included in agent prompts for context.
-
----
-
-`;
-  }
-
-  // Format and append new entry
-  const newEntry = formatProgressEntry(entry);
-  let content = existing + newEntry;
-
-  // Truncate if too large (keep header + recent entries)
-  if (content.length > MAX_PROGRESS_SIZE) {
-    const headerEnd = content.indexOf('---\n\n') + 5;
-    const header = content.slice(0, headerEnd);
-    const entries = content.slice(headerEnd);
-
-    // Keep last ~40KB of entries
-    const keepSize = MAX_PROGRESS_SIZE - header.length - 1000;
-    const trimmedEntries = entries.slice(-keepSize);
-
-    // Find a clean break point (start of an entry)
-    const cleanBreak = trimmedEntries.indexOf('\n## ');
-    if (cleanBreak > 0) {
-      content = header + '\n[...older entries truncated...]\n\n' + trimmedEntries.slice(cleanBreak + 1);
-    } else {
-      content = header + trimmedEntries;
-    }
-  }
-
-  await writeFile(filePath, content, 'utf-8');
-}
 
 /**
  * Read the progress file content for inclusion in prompts.
@@ -297,8 +59,10 @@ export async function getRecentProgressSummary(
  */
 export async function clearProgress(cwd: string): Promise<void> {
   const filePath = join(cwd, PROGRESS_FILE);
+  const dirPath = dirname(filePath);
 
   try {
+    await mkdir(dirPath, { recursive: true });
     await writeFile(filePath, getDefaultProgressHeader(), 'utf-8');
   } catch {
     // Ignore errors
@@ -312,8 +76,8 @@ export async function clearProgress(cwd: string): Promise<void> {
 function getDefaultProgressHeader(): string {
   return `# Ralph Progress Log
 
-This file tracks progress across iterations. It's automatically updated
-after each iteration and included in agent prompts for context.
+This file tracks progress across iterations. Agents update this file
+after each iteration and it's included in prompts for context.
 
 ## Codebase Patterns (Study These First)
 
