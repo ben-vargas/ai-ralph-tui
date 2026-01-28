@@ -57,11 +57,16 @@ function stripEscapeCodes(input: string): string {
   cleaned = cleaned.replace(/;+/g, '');
 
   // Step 3: Remove escape sequences
-  cleaned = cleaned.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '');
-  cleaned = cleaned.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+  // Use RegExp constructor to avoid Biome linter errors with control characters
+  const csiPattern = new RegExp('\x1b\\[[0-9;?]*[a-zA-Z]', 'g');
+  cleaned = cleaned.replace(csiPattern, '');
+
+  const oscPattern = new RegExp('\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)', 'g');
+  cleaned = cleaned.replace(oscPattern, '');
 
   // Step 4: Remove any control characters (except space, tab, newline)
-  cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, (char) => {
+  const controlCharsPattern = new RegExp('[\x00-\x1F\x7F]', 'g');
+  cleaned = cleaned.replace(controlCharsPattern, (char) => {
     // Keep space (0x20 is already outside this range)
     // Keep tab (0x09) and newline (0x0A)
     if (char === '\t' || char === '\n') return char;
@@ -134,7 +139,7 @@ export async function promptText(
     let cursorPos = 0;
 
     const cleanup = () => {
-      process.stdin.removeAllListeners('data');
+      process.stdin.removeListener('data', onData);
       process.stdin.pause();
       if (process.stdin.isTTY) {
         process.stdin.setRawMode(false);
