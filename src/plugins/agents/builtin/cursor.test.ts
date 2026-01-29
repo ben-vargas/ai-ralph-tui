@@ -471,55 +471,6 @@ describe('parseCursorJsonLine edge cases', () => {
     expect((events[0] as { name: string }).name).toBe('Glob');
   });
 
-  test('handles Cursor tool_call format with nested tool_call object', () => {
-    const input = JSON.stringify({
-      type: 'tool_call',
-      subtype: 'started',
-      call_id: 'test-id',
-      tool_call: {
-        readToolCall: {
-          args: { path: '/test/file.txt' },
-        },
-      },
-    });
-    const events = parseCursorJsonLine(input);
-    expect(events.length).toBe(1);
-    expect(events[0]?.type).toBe('tool_use');
-    expect((events[0] as { name: string }).name).toBe('Read');
-    expect((events[0] as { input: Record<string, unknown> }).input).toEqual({ path: '/test/file.txt' });
-  });
-
-  test('handles Cursor tool_call format with bashToolCall', () => {
-    const input = JSON.stringify({
-      type: 'tool_call',
-      subtype: 'started',
-      tool_call: {
-        bashToolCall: {
-          args: { command: 'ls -la' },
-        },
-      },
-    });
-    const events = parseCursorJsonLine(input);
-    expect(events.length).toBe(1);
-    expect((events[0] as { name: string }).name).toBe('Bash');
-    expect((events[0] as { input: Record<string, unknown> }).input).toEqual({ command: 'ls -la' });
-  });
-
-  test('handles Cursor tool_call format with writeToolCall', () => {
-    const input = JSON.stringify({
-      type: 'tool_call',
-      subtype: 'started',
-      tool_call: {
-        writeToolCall: {
-          args: { path: '/test/new.txt', content: 'hello' },
-        },
-      },
-    });
-    const events = parseCursorJsonLine(input);
-    expect(events.length).toBe(1);
-    expect((events[0] as { name: string }).name).toBe('Write');
-  });
-
   test('handles tool_call without name or tool', () => {
     const input = JSON.stringify({
       type: 'tool_call',

@@ -82,30 +82,8 @@ export function parseCursorJsonLine(jsonLine: string): AgentDisplayEvent[] {
     // Handle tool_call events with started/completed subtypes
     else if (event.type === 'tool_call') {
       if (event.subtype === 'started') {
-        // Cursor format has tool name as a key inside tool_call object
-        // e.g., { tool_call: { readToolCall: { args: {...} } } }
-        let toolName = event.name || event.tool || 'unknown';
-        let input = event.input;
-
-        // Extract tool name and input from Cursor's tool_call format
-        const toolCall = event.tool_call as Record<string, unknown> | undefined;
-        if (toolCall && typeof toolCall === 'object') {
-          const toolKeys = Object.keys(toolCall);
-          if (toolKeys.length > 0) {
-            const toolKey = toolKeys[0] ?? '';
-            // Convert camelCase tool key to readable name (e.g., readToolCall -> Read)
-            toolName = toolKey
-              .replace(/ToolCall$/, '')
-              .replace(/^([a-z])/, (_, c: string) => c.toUpperCase());
-            // Extract args from the tool call
-            const toolData = toolCall[toolKey] as Record<string, unknown> | undefined;
-            if (toolData?.args) {
-              input = toolData.args as Record<string, unknown>;
-            }
-          }
-        }
-
-        events.push({ type: 'tool_use', name: toolName, input });
+        const toolName = event.name || event.tool || 'unknown';
+        events.push({ type: 'tool_use', name: toolName, input: event.input });
       } else if (event.subtype === 'completed') {
         const isError = event.is_error === true || event.error !== undefined;
         if (isError) {
