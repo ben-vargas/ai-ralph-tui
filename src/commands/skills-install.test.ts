@@ -2,9 +2,13 @@
  * ABOUTME: Tests for the skills install command subprocess integration.
  * Uses mock.module to mock node:child_process spawn for unit testing
  * the handleInstallSkills function via executeSkillsCommand.
+ *
+ * IMPORTANT: The mock is set up in beforeAll (not at module level) to prevent
+ * polluting other test files. The module under test is dynamically imported
+ * after the mock is applied.
  */
 
-import { describe, test, expect, mock, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, beforeAll, afterEach, afterAll, spyOn } from 'bun:test';
 import { EventEmitter } from 'node:events';
 
 let mockSpawnArgs: Array<{ cmd: string; args: string[]; opts: unknown }> = [];
@@ -34,18 +38,30 @@ function createMockChildProcess() {
   return proc;
 }
 
-mock.module('node:child_process', () => ({
-  spawn: (cmd: string, args: string[], opts: unknown) => {
-    mockSpawnArgs.push({ cmd, args, opts });
-    return createMockChildProcess();
-  },
-}));
-
-const { executeSkillsCommand } = await import('./skills.js');
+// Declare the function type for the import
+let executeSkillsCommand: typeof import('./skills.js').executeSkillsCommand;
 
 describe('skills install command (spawn)', () => {
   let consoleSpy: ReturnType<typeof spyOn>;
   let consoleErrorSpy: ReturnType<typeof spyOn>;
+
+  beforeAll(async () => {
+    // Apply mock BEFORE importing the module under test
+    mock.module('node:child_process', () => ({
+      spawn: (cmd: string, args: string[], opts: unknown) => {
+        mockSpawnArgs.push({ cmd, args, opts });
+        return createMockChildProcess();
+      },
+    }));
+
+    // Now import the module - it will get the mocked spawn
+    const module = await import('./skills.js');
+    executeSkillsCommand = module.executeSkillsCommand;
+  });
+
+  afterAll(() => {
+    mock.restore();
+  });
 
   beforeEach(() => {
     mockSpawnArgs = [];
@@ -97,7 +113,6 @@ describe('skills install command (spawn)', () => {
 
   test('shows no-output error when exit is non-zero with empty output', async () => {
     mockSpawnExitCode = 1;
-    // No stdout or stderr set — output will be empty string
 
     await executeSkillsCommand(['install']);
 

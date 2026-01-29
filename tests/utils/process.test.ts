@@ -5,6 +5,13 @@
  * NOTE: These tests use the current runtime (bun/node) for cross-platform
  * compatibility instead of Unix-specific commands. The runtime is invoked
  * with -e flag to execute inline JavaScript.
+ *
+ * ISOLATION REQUIRED: Due to a Bun limitation where mock.restore() does not
+ * fully restore mocked Node.js built-in modules (node:child_process), this
+ * test file MUST be run in isolation when other test files mock child_process.
+ * Run with: bun test tests/utils/process.test.ts
+ *
+ * This limitation is tracked in: https://github.com/oven-sh/bun/issues/12823
  */
 
 import { describe, test, expect } from 'bun:test';
@@ -62,7 +69,8 @@ describe('process utility', () => {
         cwd: testDir,
       });
       expect(result.success).toBe(true);
-      expect(result.stdout.trim()).toBe(testDir);
+      // Handle macOS symlink resolution (/var -> /private/var)
+      expect(result.stdout.trim()).toMatch(new RegExp(`^(/private)?${testDir}$`));
     });
 
     test('uses custom environment variables', async () => {
