@@ -49,9 +49,9 @@ export function isInteractiveTerminal(): boolean {
  */
 function stripEscapeCodes(input: string): string {
   // Step 1: Remove ALL mouse tracking patterns first (before they get fragmented)
-  // Pattern: any sequence of digits and semicolons followed by 'M' or 'm'
-  // This catches: 35;106;28M, 100;200M, etc.
-  let cleaned = input.replace(/\d+(?:;\d+)*[Mm]/g, '');
+  // Pattern: sequences like 35;106;28M (requires semicolon to avoid false positives like "10m")
+  // This catches: 35;106;28M, 100;200M, etc. but NOT "10m"
+  let cleaned = input.replace(/\d+;\d+(?:;\d+)*[Mm]/g, '');
 
   // Step 2: Remove any remaining standalone semicolons (fragments from mouse codes)
   cleaned = cleaned.replace(/;+/g, '');
