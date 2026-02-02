@@ -1,9 +1,17 @@
 {{!--
-  ABOUTME: Beads-rust tracker prompt template.
+  ABOUTME: Beads-rust tracker prompt template (REFERENCE COPY).
   Context-first structure: PRD -> Task -> Workflow (br CLI)
+
+  NOTE: This file is for REFERENCE ONLY. The actual template used at runtime
+  is embedded in the code to avoid path resolution issues in bundled distributions.
+  See: https://github.com/subsy/ralph-tui/issues/248
 
   This template is specific to the beads-rust tracker (br), so its workflow
   instructions can diverge from the default beads (bd) template.
+
+  To customize this template, copy it to one of these locations:
+  - Project: .ralph-tui/templates/beads-rust.hbs
+  - Global: ~/.config/ralph-tui/templates/beads-rust.hbs
 --}}
 
 {{!-- Full PRD for project context (agent studies this first) --}}

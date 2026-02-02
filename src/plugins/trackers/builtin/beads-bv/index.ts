@@ -7,10 +7,10 @@
 
 import { spawn } from 'node:child_process';
 import { access } from 'node:fs/promises';
-import { readFileSync, constants } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { constants } from 'node:fs';
+import { join } from 'node:path';
 import { BeadsTrackerPlugin } from '../beads/index.js';
+import { BEADS_BV_TEMPLATE } from '../templates.js';
 import type {
   TrackerPluginMeta,
   TrackerPluginFactory,
@@ -116,15 +116,6 @@ export interface TaskReasoning {
   };
 }
 
-/**
- * Get the directory containing this module (for locating template.hbs).
- */
-const __dirname = dirname(fileURLToPath(import.meta.url));
-
-/**
- * Cache for the template content to avoid repeated file reads.
- */
-let templateCache: string | null = null;
 
 /**
  * Execute a bv command and return the output.
@@ -704,31 +695,11 @@ export class BeadsBvTrackerPlugin extends BeadsTrackerPlugin {
 
   /**
    * Get the prompt template for the Beads+bv tracker.
-   * Reads from the co-located template.hbs file.
+   * Returns the embedded template to avoid path resolution issues in bundled environments.
+   * See: https://github.com/subsy/ralph-tui/issues/248
    */
   override getTemplate(): string {
-    // Return cached template if available
-    if (templateCache !== null) {
-      return templateCache;
-    }
-
-    // Read template from co-located file
-    const templatePath = join(__dirname, 'template.hbs');
-    try {
-      templateCache = readFileSync(templatePath, 'utf-8');
-      return templateCache;
-    } catch (err) {
-      console.error(`Failed to read template from ${templatePath}:`, err);
-      // Return a minimal fallback template
-      return `## Task: {{taskTitle}}
-{{#if taskDescription}}
-{{taskDescription}}
-{{/if}}
-
-When finished, signal completion with:
-<promise>COMPLETE</promise>
-`;
-    }
+    return BEADS_BV_TEMPLATE;
   }
 }
 

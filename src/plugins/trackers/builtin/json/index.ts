@@ -5,9 +5,9 @@
  */
 
 import { readFile, writeFile, access, constants } from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
+import { JSON_TEMPLATE } from '../templates.js';
 import type {
   TrackerPluginMeta,
   TrackerPluginFactory,
@@ -292,28 +292,6 @@ function storyToTask(story: PrdUserStory, parentName?: string): TrackerTask {
   };
 }
 
-/** Template cache to avoid re-reading on every call */
-let templateCache: string | null = null;
-
-/** Fallback template used if external file not found */
-const FALLBACK_TEMPLATE = `## Your Task: {{taskId}} - {{taskTitle}}
-
-{{#if taskDescription}}
-### Description
-{{taskDescription}}
-{{/if}}
-
-{{#if acceptanceCriteria}}
-### Acceptance Criteria
-{{acceptanceCriteria}}
-{{/if}}
-
-## Workflow
-1. Implement this story following acceptance criteria
-2. Run quality checks
-3. Commit with: \`feat: {{taskId}} - {{taskTitle}}\`
-4. Signal completion with: <promise>COMPLETE</promise>
-`;
 
 /**
  * JSON tracker plugin implementation.
@@ -662,27 +640,11 @@ export class JsonTrackerPlugin extends BaseTrackerPlugin {
 
   /**
    * Get the prompt template for the JSON tracker.
-   * Reads from external template.hbs file with caching.
-   * Falls back to embedded template if file not found.
+   * Returns the embedded template to avoid path resolution issues in bundled environments.
+   * See: https://github.com/subsy/ralph-tui/issues/248
    */
   override getTemplate(): string {
-    if (templateCache !== null) {
-      return templateCache;
-    }
-
-    const templatePath = join(__dirname, 'template.hbs');
-    try {
-      templateCache = readFileSync(templatePath, 'utf-8');
-      return templateCache;
-    } catch (err) {
-      // Log warning and fall back to embedded template
-      console.warn(
-        `Warning: Could not read template from ${templatePath}, using fallback template.`,
-        err instanceof Error ? err.message : err
-      );
-      templateCache = FALLBACK_TEMPLATE;
-      return templateCache;
-    }
+    return JSON_TEMPLATE;
   }
 
   /**
