@@ -5,10 +5,13 @@
  */
 
 import type { ReactNode } from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useKeyboard } from '@opentui/react';
+import { relative } from 'node:path';
 import { colors, statusIndicators } from '../theme.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
+import { findFiles } from '../../utils/files.js';
+import { fuzzySearch } from '../../utils/fuzzy-search.js';
 
 /**
  * Mode for the epic loader overlay
@@ -88,6 +91,12 @@ function getEpicStatusColor(epic: TrackerTask): string {
   }
 }
 
+/** Directories to exclude from JSON file search */
+const EXCLUDED_DIRS = ['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '__pycache__'];
+
+/** Maximum number of file suggestions to display */
+const MAX_SUGGESTIONS = 8;
+
 /**
  * Modal overlay for loading/switching epics during a TUI session.
  * Supports two modes:
@@ -109,6 +118,25 @@ export function EpicLoaderOverlay({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [filePath, setFilePath] = useState('');
 
+  // File suggestion state (for file-prompt mode)
+  const [jsonFiles, setJsonFiles] = useState<string[]>([]);
+  const [selectedFileIndex, setSelectedFileIndex] = useState(0);
+  const [filesLoading, setFilesLoading] = useState(false);
+
+  // Get current working directory for relative paths
+  const cwd = process.cwd();
+
+  // Compute filtered file suggestions based on current input
+  const filteredFiles = useMemo(() => {
+    if (jsonFiles.length === 0) return [];
+    // Convert to relative paths for display and matching
+    const relativePaths = jsonFiles.map((f) => {
+      const rel = relative(cwd, f);
+      return rel.startsWith('.') ? rel : './' + rel;
+    });
+    return fuzzySearch(relativePaths, filePath, MAX_SUGGESTIONS).map((m) => m.item);
+  }, [jsonFiles, filePath, cwd]);
+
   // Reset state when overlay becomes visible
   useEffect(() => {
     if (visible) {
@@ -116,8 +144,40 @@ export function EpicLoaderOverlay({
       const currentIndex = epics.findIndex((e) => e.id === currentEpicId);
       setSelectedIndex(currentIndex >= 0 ? currentIndex : 0);
       setFilePath('');
+      setSelectedFileIndex(0);
     }
   }, [visible, epics, currentEpicId]);
+
+  // Discover JSON files when overlay becomes visible in file-prompt mode
+  useEffect(() => {
+    if (visible && mode === 'file-prompt' && jsonFiles.length === 0 && !filesLoading) {
+      setFilesLoading(true);
+      findFiles(cwd, {
+        extension: '.json',
+        recursive: true,
+        maxDepth: 5,
+      })
+        .then((files) => {
+          // Filter out excluded directories
+          const filtered = files.filter((f) => {
+            const relPath = relative(cwd, f);
+            return !EXCLUDED_DIRS.some((dir) => relPath.startsWith(dir + '/') || relPath.startsWith(dir + '\\'));
+          });
+          setJsonFiles(filtered);
+        })
+        .catch(() => {
+          // Silently fail - file suggestions are optional
+        })
+        .finally(() => {
+          setFilesLoading(false);
+        });
+    }
+  }, [visible, mode, jsonFiles.length, filesLoading, cwd]);
+
+  // Reset file selection when filtered results change
+  useEffect(() => {
+    setSelectedFileIndex(0);
+  }, [filteredFiles.length]);
 
   // Handle keyboard input
   const handleKeyboard = useCallback(
@@ -155,8 +215,36 @@ export function EpicLoaderOverlay({
 
           case 'return':
           case 'enter':
-            if (filePath.trim() && onFilePath) {
+            // If a suggestion is selected and there are suggestions, use it
+            if (filteredFiles.length > 0 && filteredFiles[selectedFileIndex]) {
+              const selected = filteredFiles[selectedFileIndex];
+              if (onFilePath) {
+                onFilePath(selected);
+              }
+            } else if (filePath.trim() && onFilePath) {
+              // Otherwise use the typed path
               onFilePath(filePath.trim());
+            }
+            break;
+
+          case 'tab':
+            // Autocomplete with selected suggestion
+            if (filteredFiles.length > 0 && filteredFiles[selectedFileIndex]) {
+              setFilePath(filteredFiles[selectedFileIndex]);
+            }
+            break;
+
+          case 'up':
+            // Navigate suggestions up
+            if (filteredFiles.length > 0) {
+              setSelectedFileIndex((prev) => Math.max(0, prev - 1));
+            }
+            break;
+
+          case 'down':
+            // Navigate suggestions down
+            if (filteredFiles.length > 0) {
+              setSelectedFileIndex((prev) => Math.min(filteredFiles.length - 1, prev + 1));
             }
             break;
 
@@ -173,7 +261,7 @@ export function EpicLoaderOverlay({
         }
       }
     },
-    [visible, mode, epics, selectedIndex, filePath, onSelect, onCancel, onFilePath]
+    [visible, mode, epics, selectedIndex, filePath, filteredFiles, selectedFileIndex, onSelect, onCancel, onFilePath]
   );
 
   useKeyboard(handleKeyboard);
@@ -199,7 +287,7 @@ export function EpicLoaderOverlay({
       <box
         style={{
           width: 70,
-          height: mode === 'file-prompt' ? 12 : 20,
+          height: mode === 'file-prompt' ? 18 : 20,
           backgroundColor: colors.bg.secondary,
           border: true,
           borderColor: colors.accent.primary,
@@ -232,7 +320,6 @@ export function EpicLoaderOverlay({
               flexGrow: 1,
               flexDirection: 'column',
               padding: 1,
-              justifyContent: 'center',
             }}
           >
             <text fg={colors.fg.secondary}>
@@ -247,12 +334,59 @@ export function EpicLoaderOverlay({
                 paddingLeft: 1,
               }}
             >
-              <text fg={colors.fg.primary}>{filePath}</text>
-              <text fg={colors.accent.primary}>_</text>
+              <text fg={colors.fg.primary}>
+                {filePath}
+                <span fg={colors.accent.primary}>_</span>
+              </text>
             </box>
             <box style={{ height: 1 }} />
+
+            {/* File suggestions list */}
+            {filteredFiles.length > 0 && (
+              <box
+                style={{
+                  flexDirection: 'column',
+                  height: Math.min(filteredFiles.length, MAX_SUGGESTIONS),
+                }}
+              >
+                {filteredFiles.map((file, index) => {
+                  const isSelected = index === selectedFileIndex;
+                  return (
+                    <box
+                      key={file}
+                      style={{
+                        width: '100%',
+                        height: 1,
+                        flexDirection: 'row',
+                        backgroundColor: isSelected ? colors.bg.highlight : 'transparent',
+                      }}
+                    >
+                      <text fg={isSelected ? colors.accent.primary : 'transparent'}>
+                        {isSelected ? '▸ ' : '  '}
+                      </text>
+                      <text fg={isSelected ? colors.fg.primary : colors.fg.secondary}>
+                        {truncateText(file, 60)}
+                      </text>
+                    </box>
+                  );
+                })}
+              </box>
+            )}
+
+            {/* Show loading indicator or empty state */}
+            {filteredFiles.length === 0 && filesLoading && (
+              <text fg={colors.fg.muted}>  Searching for JSON files...</text>
+            )}
+            {filteredFiles.length === 0 && !filesLoading && filePath.length > 0 && (
+              <text fg={colors.fg.muted}>  No matching files found</text>
+            )}
+
+            <box style={{ flexGrow: 1 }} />
             <text fg={colors.fg.muted}>
-              Press Enter to load, Escape to cancel
+              <span fg={colors.accent.primary}>↑↓</span> Navigate{'  '}
+              <span fg={colors.accent.primary}>Enter</span> Select{'  '}
+              <span fg={colors.accent.primary}>Tab</span> Complete{'  '}
+              <span fg={colors.accent.primary}>Esc</span> Cancel
             </text>
           </box>
         ) : loading ? (
@@ -360,32 +494,30 @@ export function EpicLoaderOverlay({
           </box>
         )}
 
-        {/* Footer */}
-        <box
-          style={{
-            width: '100%',
-            height: 2,
-            flexDirection: 'row',
-            justifyContent: 'center',
-            alignItems: 'center',
-            backgroundColor: colors.bg.tertiary,
-            gap: 3,
-          }}
-        >
-          {mode === 'list' && (
-            <>
-              <text fg={colors.fg.muted}>
-                <span fg={colors.accent.primary}>Enter</span> Select
-              </text>
-              <text fg={colors.fg.muted}>
-                <span fg={colors.accent.primary}>↑↓/jk</span> Navigate
-              </text>
-            </>
-          )}
-          <text fg={colors.fg.muted}>
-            <span fg={colors.accent.primary}>Esc</span> Cancel
-          </text>
-        </box>
+        {/* Footer - only shown for list mode (file-prompt has inline help) */}
+        {mode === 'list' && (
+          <box
+            style={{
+              width: '100%',
+              height: 2,
+              flexDirection: 'row',
+              justifyContent: 'center',
+              alignItems: 'center',
+              backgroundColor: colors.bg.tertiary,
+              gap: 3,
+            }}
+          >
+            <text fg={colors.fg.muted}>
+              <span fg={colors.accent.primary}>Enter</span> Select
+            </text>
+            <text fg={colors.fg.muted}>
+              <span fg={colors.accent.primary}>↑↓/jk</span> Navigate
+            </text>
+            <text fg={colors.fg.muted}>
+              <span fg={colors.accent.primary}>Esc</span> Cancel
+            </text>
+          </box>
+        )}
       </box>
     </box>
   );
