@@ -17,6 +17,10 @@ function validateGitRef(ref: string, context: string): void {
   if (!ref || ref.trim() === '') {
     throw new Error(`Invalid git ref for ${context}: ref is empty`);
   }
+  // A lone '@' is not a valid ref (it's a shorthand for HEAD)
+  if (ref === '@') {
+    throw new Error(`Invalid git ref for ${context}: is '@'`);
+  }
   // Cannot contain spaces
   if (ref.includes(' ')) {
     throw new Error(`Invalid git ref for ${context}: contains spaces`);
@@ -47,6 +51,10 @@ function validateGitRef(ref: string, context: string): void {
   // Cannot end with .lock
   if (ref.endsWith('.lock')) {
     throw new Error(`Invalid git ref for ${context}: ends with '.lock'`);
+  }
+  // Cannot end with a slash
+  if (ref.endsWith('/')) {
+    throw new Error(`Invalid git ref for ${context}: ends with '/'`);
   }
   // Cannot contain certain characters
   if (/[~^:?*\[\\]/.test(ref)) {
@@ -614,13 +622,18 @@ export class MergeEngine {
 
       for (const line of output.split('\n')) {
         const status = line.substring(0, 2);
-        // UU = both modified, AA = both added, DD = both deleted
+        // Unmerged status codes:
+        // UU = both modified, AA = both added, DD = both deleted,
+        // AU = added by us, UA = added by them,
+        // DU = deleted by us (modified by them), UD = deleted by them (modified by us)
         if (
           status === 'UU' ||
           status === 'AA' ||
           status === 'DD' ||
           status === 'AU' ||
-          status === 'UA'
+          status === 'UA' ||
+          status === 'DU' ||
+          status === 'UD'
         ) {
           conflicted.push(line.substring(3).trim());
         }

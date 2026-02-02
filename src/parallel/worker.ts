@@ -224,12 +224,14 @@ export class Worker {
 
   /**
    * Stop the worker's execution engine.
+   * Sets status to 'cancelled' immediately before stopping the engine so that
+   * start()'s post-start check via getStatus() observes the cancelled state.
    */
   async stop(): Promise<void> {
+    this.status = 'cancelled';
     if (this.engine) {
       await this.engine.stop();
     }
-    this.status = 'cancelled';
   }
 
   /**
