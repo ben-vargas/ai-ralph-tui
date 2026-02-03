@@ -643,7 +643,7 @@ export class ParallelExecutor {
 }
 
 // Re-export key types and functions for convenient imports
-export { analyzeTaskGraph, shouldRunParallel } from './task-graph.js';
+export { analyzeTaskGraph, shouldRunParallel, recommendParallelism } from './task-graph.js';
 export { WorktreeManager } from './worktree-manager.js';
 export { MergeEngine } from './merge-engine.js';
 export { ConflictResolver } from './conflict-resolver.js';
@@ -660,6 +660,8 @@ export type {
   MergeOperation,
   FileConflict,
   ConflictResolutionResult,
+  ParallelismRecommendation,
+  ParallelismConfidence,
 } from './types.js';
 export type {
   ParallelEvent,
