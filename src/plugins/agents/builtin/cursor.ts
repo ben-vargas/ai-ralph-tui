@@ -1,5 +1,5 @@
 /**
- * ABOUTME: Cursor Agent CLI plugin for the `agent` command.
+ * ABOUTME: Cursor Agent CLI plugin for the `cursor` command.
  * Integrates with Cursor Agent CLI for AI-assisted coding.
  * Supports: print mode execution, JSONL streaming, auto-approve, model selection.
  */
@@ -7,6 +7,7 @@
 import { spawn } from 'node:child_process';
 import { BaseAgentPlugin, findCommandPath, quoteForWindowsShell } from '../base.js';
 import { processAgentEvents, processAgentEventsToSegments, type AgentDisplayEvent } from '../output-formatting.js';
+import { extractErrorMessage } from '../utils.js';
 import type {
   AgentPluginMeta,
   AgentPluginFactory,
@@ -17,27 +18,8 @@ import type {
   AgentExecutionHandle,
 } from '../types.js';
 
-/**
- * Extract a string error message from various error formats.
- * Handles: string, { message: string }, or other objects.
- * @internal Exported for testing only.
- */
-export function extractErrorMessage(err: unknown): string {
-  if (!err) return '';
-  if (typeof err === 'string') return err;
-  if (typeof err === 'object') {
-    const obj = err as Record<string, unknown>;
-    if (typeof obj.message === 'string') return obj.message;
-    if (typeof obj.error === 'string') return obj.error;
-    // Fallback: stringify the object
-    try {
-      return JSON.stringify(err);
-    } catch {
-      return 'Unknown error';
-    }
-  }
-  return String(err);
-}
+// Re-export for backward compatibility with tests
+export { extractErrorMessage } from '../utils.js';
 
 /**
  * Parse Cursor Agent JSON line into standardized display events.
@@ -135,7 +117,7 @@ export class CursorAgentPlugin extends BaseAgentPlugin {
     description: 'Cursor Agent CLI for AI-assisted coding',
     version: '1.0.0',
     author: 'Cursor',
-    defaultCommand: 'agent',
+    defaultCommand: 'cursor',
     supportsStreaming: true,
     supportsInterrupt: true,
     supportsFileContext: false,
@@ -193,7 +175,7 @@ export class CursorAgentPlugin extends BaseAgentPlugin {
     if (!findResult.found) {
       return {
         available: false,
-        error: `Cursor Agent CLI not found in PATH. Install with: curl https://cursor.com/install | sh`,
+        error: `Cursor CLI not found in PATH. Install from: https://docs.cursor.com/cli`,
       };
     }
 
@@ -494,9 +476,9 @@ export class CursorAgentPlugin extends BaseAgentPlugin {
   protected override getPreflightSuggestion(): string {
     return (
       'Common fixes for Cursor Agent:\n' +
-      '  1. Test Cursor Agent directly: agent --print "hello"\n' +
-      '  2. Check Cursor Agent is installed: agent --version\n' +
-      '  3. Install with: curl https://cursor.com/install | sh\n' +
+      '  1. Test Cursor directly: cursor --print "hello"\n' +
+      '  2. Check Cursor is installed: cursor --version\n' +
+      '  3. Install from: https://docs.cursor.com/cli\n' +
       '  4. Verify your model configuration if using a specific model'
     );
   }
