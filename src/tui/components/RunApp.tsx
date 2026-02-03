@@ -956,27 +956,28 @@ export function RunApp({
     }
   }, [subagentTree.length, subagentPanelVisible, userManuallyHidPanel, onSubagentPanelVisibilityChange]);
 
-  // Regenerate prompt preview when selected task changes (if in prompt view mode)
-  // This keeps the prompt preview in sync with the currently selected task/iteration
-  // Works for both tasks view (uses selectedIndex) and iterations view (uses iteration's task)
-  useEffect(() => {
-    // Compute effective task ID based on current view mode
-    // In iterations view, use the task from the selected iteration
-    // In tasks view, use the task from the task list
-    const selectedIteration = viewMode === 'iterations' && iterations.length > 0
+  // Compute effective task ID for prompt preview - memoized to avoid unstable references
+  // This is computed early so the useEffect can depend on a stable string instead of arrays
+  const promptPreviewTaskId = useMemo(() => {
+    const selectedIter = viewMode === 'iterations' && iterations.length > 0
       ? iterations[iterationSelectedIndex]
       : undefined;
-    const effectiveTaskId = viewMode === 'iterations'
-      ? selectedIteration?.task?.id
+    return viewMode === 'iterations'
+      ? selectedIter?.task?.id
       : displayedTasks[selectedIndex]?.id;
+  }, [viewMode, iterations, iterationSelectedIndex, displayedTasks, selectedIndex]);
 
+  // Regenerate prompt preview when selected task changes (if in prompt view mode)
+  // This keeps the prompt preview in sync with the currently selected task/iteration
+  // Depends on promptPreviewTaskId (stable string) instead of arrays to avoid re-render loops
+  useEffect(() => {
     // If not in prompt view mode, do nothing
     if (detailsViewMode !== 'prompt') {
       return;
     }
 
     // If no task is selected, clear the preview
-    if (!effectiveTaskId) {
+    if (!promptPreviewTaskId) {
       setPromptPreview('No task selected');
       setTemplateSource(undefined);
       return;
@@ -991,7 +992,7 @@ export function RunApp({
     void (async () => {
       // Use remote API when viewing remote, local engine otherwise
       if (isViewingRemote && instanceManager) {
-        const result = await instanceManager.getRemotePromptPreview(effectiveTaskId);
+        const result = await instanceManager.getRemotePromptPreview(promptPreviewTaskId);
         if (cancelled) return;
 
         if (result === null) {
@@ -1005,7 +1006,7 @@ export function RunApp({
           setTemplateSource(undefined);
         }
       } else if (engine) {
-        const result = await engine.generatePromptPreview(effectiveTaskId);
+        const result = await engine.generatePromptPreview(promptPreviewTaskId);
         // Don't update state if this effect was cancelled (user changed task again)
         if (cancelled) return;
 
@@ -1023,7 +1024,7 @@ export function RunApp({
     return () => {
       cancelled = true;
     };
-  }, [detailsViewMode, viewMode, displayedTasks, selectedIndex, iterations, iterationSelectedIndex, engine, isViewingRemote, instanceManager]);
+  }, [detailsViewMode, promptPreviewTaskId, engine, isViewingRemote, instanceManager]);
 
   // Fetch remote iteration output when selecting a different task (for remote viewing)
   // This fills the remoteIterationCache so the useMemo can use it synchronously
