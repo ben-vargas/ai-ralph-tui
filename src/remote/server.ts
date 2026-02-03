@@ -239,6 +239,8 @@ export class RemoteServer {
   private _actualPort: number | null = null;
   /** Active parallel orchestration session (only one at a time) */
   private orchestrationSession: OrchestrationSession | null = null;
+  /** Guard flag to prevent race conditions during orchestration startup */
+  private orchestrationStarting: boolean = false;
 
   constructor(options: RemoteServerOptions) {
     this.options = options;
@@ -1311,8 +1313,8 @@ export class RemoteServer {
   ): Promise<void> {
     const clientId = `${clientState.id}@${clientState.ip}`;
 
-    // Check if orchestration is already running
-    if (this.orchestrationSession) {
+    // Check if orchestration is already running or starting (prevents race conditions)
+    if (this.orchestrationSession || this.orchestrationStarting) {
       const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
         success: false,
         error: 'Orchestration already in progress',
@@ -1322,8 +1324,12 @@ export class RemoteServer {
       return;
     }
 
+    // Set the starting guard before any async operations to prevent concurrent starts
+    this.orchestrationStarting = true;
+
     // Check if we have the required config
     if (!this.options.baseConfig || !this.options.tracker) {
+      this.orchestrationStarting = false;
       const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
         success: false,
         error: 'Parallel config not set. Call setParallelConfig() first.',
@@ -1334,17 +1340,30 @@ export class RemoteServer {
     }
 
     try {
+      // Check if filteredTaskIds is explicitly an empty array (no tasks match filter)
+      const filteredTaskIds = this.options.baseConfig.filteredTaskIds;
+      if (filteredTaskIds !== undefined && filteredTaskIds.length === 0) {
+        this.orchestrationStarting = false;
+        const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
+          success: false,
+          error: 'No tasks match the specified filter',
+        });
+        response.id = message.id;
+        this.send(ws, response);
+        return;
+      }
+
       // Fetch tasks from tracker
       let tasks = await this.options.tracker.getTasks({ status: ['open', 'in_progress'] });
 
-      // Apply filteredTaskIds filter if specified in baseConfig
-      const filteredTaskIds = this.options.baseConfig.filteredTaskIds;
+      // Apply filteredTaskIds filter if specified in baseConfig (non-empty array)
       if (filteredTaskIds && filteredTaskIds.length > 0) {
         const allowedIds = new Set(filteredTaskIds);
         tasks = tasks.filter((t) => allowedIds.has(t.id));
       }
 
       if (tasks.length === 0) {
+        this.orchestrationStarting = false;
         const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
           success: false,
           error: filteredTaskIds?.length ? 'No tasks match the specified filter' : 'No actionable tasks found',
@@ -1358,6 +1377,7 @@ export class RemoteServer {
       const analysis = analyzeTaskGraph(tasks);
 
       if (!shouldRunParallel(analysis)) {
+        this.orchestrationStarting = false;
         const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
           success: false,
           error: 'Tasks not suitable for parallel execution (too few tasks or too many dependencies)',
@@ -1373,6 +1393,7 @@ export class RemoteServer {
       // Validate and determine maxWorkers (must be a positive integer)
       let maxWorkers = message.maxWorkers ?? 3;
       if (typeof maxWorkers !== 'number' || !Number.isInteger(maxWorkers) || maxWorkers < 1) {
+        this.orchestrationStarting = false;
         const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
           success: false,
           error: `Invalid maxWorkers value: ${message.maxWorkers}. Must be a positive integer.`,
@@ -1436,6 +1457,9 @@ export class RemoteServer {
         status: 'running',
       };
 
+      // Clear the starting guard now that session is established
+      this.orchestrationStarting = false;
+
       // Mark requesting client as subscribed to parallel events
       clientState.subscribedToParallel = true;
 
@@ -1466,6 +1490,7 @@ export class RemoteServer {
       });
 
     } catch (error) {
+      this.orchestrationStarting = false;
       const response = createMessage<OrchestrateStartResponseMessage>('orchestrate:start_response', {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to start orchestration',
