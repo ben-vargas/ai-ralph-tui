@@ -304,11 +304,6 @@ async function convertToBeads(
       '--silent',
     ];
 
-    // Include PRD link if available
-    if (prdPath) {
-      storyArgs.splice(-1, 0, '--external-ref', `prd:${prdPath}`);
-    }
-
     if (verbose) {
       console.log(`  bd ${storyArgs.join(' ')}`);
     }
