@@ -13,6 +13,7 @@ GitHub Copilot leverages your GitHub account and subscription for AI-powered cod
 
 ## Prerequisites
 
+```bash
 # Install GitHub CLI
 # See: https://github.com/cli/cli
 
@@ -21,6 +22,7 @@ brew install copilot-cli
 # Or: npm install -g `@github/copilot`
 # Or: winget install GitHub.Copilot (Windows)
 # Or: curl -fsSL https://gh.io/copilot-install | bash
+```
 
 Verify installation:
 
@@ -142,9 +144,10 @@ Ensure Copilot is installed and in your PATH:
 which copilot
 # Should output: /path/to/copilot
 
-# If not found, install GitHub CLI and extension:
-# https://github.com/cli/cli
-gh extension install github/gh-copilot
+# If not found, install Copilot CLI:
+brew install copilot-cli
+# Or: npm install -g `@github/copilot`
+# Or: curl -fsSL https://gh.io/copilot-install | bash
 ```
 
 ### "Execution timeout"

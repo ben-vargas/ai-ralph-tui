@@ -156,16 +156,16 @@ describe('GithubCopilotAgentPlugin buildArgs', () => {
         await plugin.dispose();
     });
 
-    test('includes --yes by default', async () => {
+    test('includes --yolo by default', async () => {
         await plugin.initialize({});
         const args = (plugin as TestableGithubCopilotPlugin).testBuildArgs('test prompt');
-        expect(args).toContain('--yes');
+        expect(args).toContain('--yolo');
     });
 
-    test('omits --yes when autoApprove is disabled', async () => {
+    test('omits --yolo when autoApprove is disabled', async () => {
         await plugin.initialize({ autoApprove: false });
         const args = (plugin as TestableGithubCopilotPlugin).testBuildArgs('test prompt');
-        expect(args).not.toContain('--yes');
+        expect(args).not.toContain('--yolo');
     });
 
     test('includes model flag when specified', async () => {
