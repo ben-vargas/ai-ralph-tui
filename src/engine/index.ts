@@ -30,7 +30,11 @@ import type { RalphConfig, RateLimitHandlingConfig } from '../config/types.js';
 import { DEFAULT_RATE_LIMIT_HANDLING } from '../config/types.js';
 import { RateLimitDetector, type RateLimitDetectionResult } from './rate-limit-detector.js';
 import type { TrackerPlugin, TrackerTask } from '../plugins/trackers/types.js';
-import type { AgentPlugin, AgentExecutionHandle } from '../plugins/agents/types.js';
+import type {
+  AgentPlugin,
+  AgentExecutionHandle,
+  AgentExecutionResult,
+} from '../plugins/agents/types.js';
 import { getAgentRegistry } from '../plugins/agents/registry.js';
 import { getTrackerRegistry } from '../plugins/trackers/registry.js';
 import { SubagentTraceParser } from '../plugins/agents/tracing/parser.js';
@@ -63,6 +67,76 @@ const PRIMARY_RECOVERY_TEST_TIMEOUT_MS = 5000;
  * Kept simple to minimize token usage and allow fast response.
  */
 const PRIMARY_RECOVERY_TEST_PROMPT = 'Reply with just the word "ok".';
+
+/**
+ * Maximum characters kept for live stdout/stderr buffers in engine state.
+ * These buffers are for UI/remote progress display and should stay bounded.
+ */
+const MAX_ENGINE_LIVE_STREAM_CHARS = 250_000;
+
+/**
+ * Maximum characters kept per iteration in in-memory history.
+ * Full raw output is persisted to iteration logs on disk.
+ */
+const MAX_ITERATION_HISTORY_STREAM_CHARS = 100_000;
+
+/**
+ * Prefix used when trimming output retained in memory.
+ */
+const OUTPUT_TRUNCATED_PREFIX = '[...output truncated in memory...]\n';
+
+/**
+ * Append text to an in-memory buffer while enforcing a maximum size.
+ * Keeps the tail because completion markers and recent context are usually at the end.
+ */
+function appendWithCharLimit(
+  current: string,
+  chunk: string,
+  maxChars: number,
+  prefix = OUTPUT_TRUNCATED_PREFIX
+): string {
+  if (!chunk) return current;
+  if (maxChars <= 0) return '';
+
+  const combined = current + chunk;
+  if (combined.length <= maxChars) {
+    return combined;
+  }
+
+  if (maxChars <= prefix.length) {
+    return prefix.slice(0, maxChars);
+  }
+
+  const keep = maxChars - prefix.length;
+  return prefix + combined.slice(-keep);
+}
+
+/**
+ * Create a memory-safe copy of an AgentExecutionResult for iteration history.
+ * Keeps disk logs complete while preventing in-memory iteration arrays from growing unbounded.
+ */
+function toMemorySafeAgentResult(agentResult: AgentExecutionResult): AgentExecutionResult {
+  const safeStdout = appendWithCharLimit(
+    '',
+    agentResult.stdout,
+    MAX_ITERATION_HISTORY_STREAM_CHARS
+  );
+  const safeStderr = appendWithCharLimit(
+    '',
+    agentResult.stderr,
+    MAX_ITERATION_HISTORY_STREAM_CHARS
+  );
+
+  if (safeStdout === agentResult.stdout && safeStderr === agentResult.stderr) {
+    return agentResult;
+  }
+
+  return {
+    ...agentResult,
+    stdout: safeStdout,
+    stderr: safeStderr,
+  };
+}
 
 /**
  * Build prompt for the agent based on task using the template system.
@@ -945,7 +1019,11 @@ export class ExecutionEngine {
           this.subagentParser.processMessage(claudeMessage);
         },
         onStdout: (data) => {
-          this.state.currentOutput += data;
+          this.state.currentOutput = appendWithCharLimit(
+            this.state.currentOutput,
+            data,
+            MAX_ENGINE_LIVE_STREAM_CHARS
+          );
           this.emit({
             type: 'agent:output',
             timestamp: new Date().toISOString(),
@@ -973,7 +1051,11 @@ export class ExecutionEngine {
 
         },
         onStderr: (data) => {
-          this.state.currentStderr += data;
+          this.state.currentStderr = appendWithCharLimit(
+            this.state.currentStderr,
+            data,
+            MAX_ENGINE_LIVE_STREAM_CHARS
+          );
           this.emit({
             type: 'agent:output',
             timestamp: new Date().toISOString(),
@@ -1127,7 +1209,7 @@ export class ExecutionEngine {
         iteration,
         status,
         task,
-        agentResult,
+        agentResult: toMemorySafeAgentResult(agentResult),
         taskCompleted,
         promiseComplete,
         durationMs,
@@ -2005,6 +2087,15 @@ export class ExecutionEngine {
     this.listeners = [];
   }
 }
+
+/**
+ * Test-only exports for internal memory helpers.
+ * Do not use from production code.
+ */
+export const __test__ = {
+  appendWithCharLimit,
+  toMemorySafeAgentResult,
+};
 
 // Re-export types
 export type {
