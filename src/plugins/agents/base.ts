@@ -153,9 +153,9 @@ function appendWithCharLimit(
   if (!chunk) return current;
   if (maxChars <= 0) return '';
 
-  const combined = current + chunk;
-  if (combined.length <= maxChars) {
-    return combined;
+  const totalLen = current.length + chunk.length;
+  if (totalLen <= maxChars) {
+    return current + chunk;
   }
 
   if (maxChars <= prefix.length) {
@@ -163,7 +163,20 @@ function appendWithCharLimit(
   }
 
   const keep = maxChars - prefix.length;
-  return prefix + combined.slice(-keep);
+  const combinedTailStart = totalLen - keep;
+
+  let tail: string;
+  if (combinedTailStart >= current.length) {
+    const startInChunk = combinedTailStart - current.length;
+    tail = chunk.slice(startInChunk);
+  } else {
+    const tailFromCurrent = current.slice(combinedTailStart);
+    const remaining = keep - tailFromCurrent.length;
+    const tailFromChunk = remaining > 0 ? chunk.slice(-remaining) : '';
+    tail = tailFromCurrent + tailFromChunk;
+  }
+
+  return prefix + tail;
 }
 
 /**

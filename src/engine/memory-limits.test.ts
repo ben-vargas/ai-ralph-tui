@@ -7,6 +7,20 @@ import { describe, expect, test } from 'bun:test';
 import { __test__ as engineTest } from './index.js';
 
 describe('ExecutionEngine memory helpers', () => {
+  test('appendWithCharLimit preserves tail across current and chunk', () => {
+    const prefix = '[trim]\n';
+    const result = engineTest.appendWithCharLimit(
+      'current-abcdefghijklmnopqrstuvwxyz',
+      'chunk-0123456789',
+      24,
+      prefix
+    );
+
+    expect(result.startsWith(prefix)).toBe(true);
+    expect(result.length).toBeLessThanOrEqual(24);
+    expect(result.endsWith('zchunk-0123456789')).toBe(true);
+  });
+
   test('toMemorySafeAgentResult returns same object for small output', () => {
     const input = {
       executionId: 'exec-1',
@@ -47,4 +61,3 @@ describe('ExecutionEngine memory helpers', () => {
     expect(safe.stdout.startsWith('[...output truncated in memory...]')).toBe(true);
   });
 });
-
