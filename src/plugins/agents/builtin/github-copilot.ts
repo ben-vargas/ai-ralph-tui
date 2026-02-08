@@ -33,8 +33,8 @@ export class GithubCopilotAgentPlugin extends BaseAgentPlugin {
         supportsSubagentTracing: false,
         structuredOutputFormat: undefined,
         skillsPaths: {
-          personal: '~/.copilot/skills',
-          repo: '.copilot/skills',
+            personal: '~/.copilot/skills',
+            repo: '.copilot/skills',
         },
     };
 
@@ -60,7 +60,7 @@ export class GithubCopilotAgentPlugin extends BaseAgentPlugin {
 
     override getSandboxRequirements() {
         return {
-            authPaths: ['~/.config/github-copilot', '~/.gitconfig'],
+            authPaths: ['~/.config/github-copilot', '~/.config/gh', '~/.gitconfig'],
             binaryPaths: [
                 '/usr/local/bin',
                 '~/.local/bin',

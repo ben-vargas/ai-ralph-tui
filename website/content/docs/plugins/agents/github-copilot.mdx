@@ -14,14 +14,14 @@ GitHub Copilot leverages your GitHub account and subscription for AI-powered cod
 ## Prerequisites
 
 ```bash
-# Install GitHub CLI
-# See: https://github.com/cli/cli
-
 # Install Copilot CLI
 brew install copilot-cli
-# Or: npm install -g `@github/copilot`
+# Or: npm install -g @github/copilot
 # Or: winget install GitHub.Copilot (Windows)
 # Or: curl -fsSL https://gh.io/copilot-install | bash
+
+# (Optional) Install GitHub CLI for authentication
+# See: https://github.com/cli/cli
 ```
 
 Verify installation:
@@ -163,11 +163,24 @@ timeout = 600000  # 10 minutes
 
 ### "Authentication failed"
 
-Authenticate with GitHub:
+Authenticate with GitHub Copilot using one of the following methods:
+
+**Method 1: Interactive Login**
+
+Run the `copilot` command and use the `/login` command at the prompt:
 
 ```bash
-gh auth login
-# Verify Copilot subscription is active
+copilot
+# In the prompt, type: /login
+```
+
+**Method 2: Non-Interactive (Token)**
+
+Set `GH_TOKEN` or `GITHUB_TOKEN` to a fine-grained Personal Access Token (PAT) that includes the "Copilot Requests" permission:
+
+```bash
+export GH_TOKEN="your_fine_grained_pat"
+# Or: export GITHUB_TOKEN="your_fine_grained_pat"
 ```
 
 ## Next Steps

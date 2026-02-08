@@ -124,6 +124,7 @@ describe('GithubCopilotAgentPlugin', () => {
         test('includes github-copilot auth paths', () => {
             const requirements = plugin.getSandboxRequirements();
             expect(requirements.authPaths).toContain('~/.config/github-copilot');
+            expect(requirements.authPaths).toContain('~/.config/gh');
             expect(requirements.authPaths).toContain('~/.gitconfig');
         });
 
