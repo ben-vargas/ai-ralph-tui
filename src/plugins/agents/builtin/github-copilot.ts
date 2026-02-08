@@ -34,7 +34,7 @@ export class GithubCopilotAgentPlugin extends BaseAgentPlugin {
         structuredOutputFormat: undefined,
         skillsPaths: {
             personal: '~/.copilot/skills',
-            repo: '.copilot/skills',
+            repo: '.github/skills',
         },
     };
 
@@ -167,7 +167,7 @@ export class GithubCopilotAgentPlugin extends BaseAgentPlugin {
                 type: 'text',
                 default: '',
                 required: false,
-                help: 'Model name (e.g., gpt-4, gpt-3.5-turbo). Leave empty for default.',
+                help: 'Model name. Run "/model" in the Copilot CLI to see available models (varies by account). Leave empty for default.',
             },
             {
                 id: 'autoApprove',
