@@ -619,7 +619,6 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
 
       // Check for slash commands first
       if (isSlashCommand(userMessage)) {
-        setInputValue('');
         const result = await executeSlashCommand(userMessage, {
           // Pass true to delete files - slash commands are user-initiated cancellations
           clearPendingImages: () => clearImages(true),
@@ -627,6 +626,7 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
         });
 
         if (result.handled) {
+          setInputValue('');
           // Show feedback via toast
           if (result.success) {
             toast.showSuccess(result.message ?? 'Command executed');
@@ -635,9 +635,6 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
           }
           return;
         }
-        // If command not handled, fall through to send as message
-        // (but don't - unknown commands should be ignored)
-        return;
       }
 
       // Regular message - requires engine
