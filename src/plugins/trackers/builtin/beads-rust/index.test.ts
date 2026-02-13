@@ -213,6 +213,50 @@ describe('BeadsRustTrackerPlugin', () => {
       expect(tasks[0]?.id).toBe('epic.1');
     });
 
+    test('uses setEpicId for parent filtering when filter is not provided', async () => {
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'br version 0.4.1\n' },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'epic-parent-child', title: 'Tracked child', status: 'open', priority: 1 },
+            { id: 'other', title: 'Unrelated task', status: 'open', priority: 1 },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              issue_id: 'epic-parent-child',
+              depends_on_id: 'epic-parent',
+              type: 'parent-child',
+              title: 'Tracked child',
+              status: 'open',
+              priority: 1,
+            },
+          ]),
+        },
+      ];
+
+      const plugin = new BeadsRustTrackerPlugin();
+      await plugin.initialize({ workingDir: '/test' });
+      plugin.setEpicId('epic-parent');
+      mockSpawnArgs = [];
+
+      const tasks = await plugin.getTasks();
+
+      expect(mockSpawnArgs[1]?.args).toEqual([
+        'dep',
+        'list',
+        'epic-parent',
+        '--direction',
+        'up',
+        '--json',
+      ]);
+      expect(tasks.length).toBe(1);
+      expect(tasks[0]?.id).toBe('epic-parent-child');
+    });
+
     test('returns empty array when br dep list fails for parent filtering', async () => {
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
@@ -1055,6 +1099,47 @@ describe('BeadsRustTrackerPlugin', () => {
   });
 
   describe('tombstone filtering', () => {
+    test('getPrdContext excludes tombstoned dependents from child counts', async () => {
+      mockReadFileContent = '# PRD\n\nHello from PRD\n';
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'br version 0.4.1\n' },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              id: 'epic-tombstone-assert',
+              title: 'Epic with mixed dependents',
+              description: 'Epic desc',
+              status: 'open',
+              priority: 0,
+              external_ref: 'prd:./tasks/prd.md',
+              dependents: [
+                { id: 'dep-completed-keep', title: 'Completed', status: 'closed', type: 'parent-child' },
+                { id: 'dep-cancelled-keep', title: 'Cancelled', status: 'cancelled', type: 'parent-child' },
+                { id: 'dep-open-keep', title: 'Open', status: 'open', type: 'parent-child' },
+                { id: 'dep-tombstone-skip', title: 'Deleted', status: 'tombstone', type: 'parent-child' },
+              ],
+            },
+          ]),
+        },
+      ];
+
+      const plugin = new BeadsRustTrackerPlugin();
+      await plugin.initialize({ workingDir: '/test', epicId: 'epic-tombstone-assert' });
+      mockSpawnArgs = [];
+
+      const result = await plugin.getPrdContext();
+
+      expect(result).toEqual({
+        name: 'Epic with mixed dependents',
+        description: 'Epic desc',
+        content: '# PRD\n\nHello from PRD\n',
+        completedCount: 2,
+        totalCount: 3,
+      });
+      expect(mockReadFilePaths).toEqual(['/test/tasks/prd.md']);
+    });
+
     test('getTasks filters out tombstoned issues', async () => {
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
