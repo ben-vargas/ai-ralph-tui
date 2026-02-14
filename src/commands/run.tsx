@@ -1126,6 +1126,26 @@ function RunAppWrapper({
   const trackerRegistry = getTrackerRegistry();
   const availableAgents = agentRegistry.getRegisteredPlugins();
   const availableTrackers = trackerRegistry.getRegisteredPlugins();
+  const configuredAgentNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          (storedConfig?.agents ?? [])
+            .map((agent) => agent.name)
+            .filter((name): name is string => typeof name === 'string' && name.length > 0),
+        ),
+      ),
+    [storedConfig?.agents],
+  );
+  const availableAgentNames = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...availableAgents.map((agent) => agent.id), ...configuredAgentNames],
+        ),
+      ),
+    [availableAgents, configuredAgentNames],
+  );
 
   // Handle settings save
   const handleSaveSettings = async (newConfig: StoredConfig): Promise<void> => {
@@ -1233,7 +1253,7 @@ function RunAppWrapper({
       initialTasks={tasks}
       onStart={onStart}
       storedConfig={storedConfig}
-      availableAgents={availableAgents}
+      availableAgents={availableAgentNames}
       availableTrackers={availableTrackers}
       onSaveSettings={handleSaveSettings}
       onLoadEpics={handleLoadEpics}

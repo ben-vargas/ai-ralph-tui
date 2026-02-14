@@ -9,7 +9,6 @@ import { useState, useCallback, useEffect } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { colors } from '../theme.js';
 import type { StoredConfig, SubagentDetailLevel, NotificationSoundMode } from '../../config/types.js';
-import type { AgentPluginMeta } from '../../plugins/agents/types.js';
 import type { TrackerPluginMeta } from '../../plugins/trackers/types.js';
 
 /**
@@ -41,8 +40,8 @@ export interface SettingsViewProps {
   visible: boolean;
   /** Current stored configuration */
   config: StoredConfig;
-  /** Available agent plugins */
-  agents: AgentPluginMeta[];
+  /** Available agent names for selection */
+  agents: string[];
   /** Available tracker plugins */
   trackers: TrackerPluginMeta[];
   /** Callback when settings should be saved */
@@ -55,7 +54,7 @@ export interface SettingsViewProps {
  * Build setting definitions based on available plugins
  */
 function buildSettingDefinitions(
-  agents: AgentPluginMeta[],
+  agents: string[],
   trackers: TrackerPluginMeta[]
 ): SettingDefinition[] {
   return [
@@ -78,8 +77,8 @@ function buildSettingDefinitions(
       label: 'Agent',
       type: 'select',
       description: 'AI agent plugin to use',
-      options: agents.map((a) => a.id),
-      getValue: (config) => config.agent ?? config.defaultAgent,
+      options: agents,
+      getValue: (config) => config.agent ?? config.defaultAgent ?? config.agents?.[0]?.name,
       setValue: (config, value) => ({
         ...config,
         agent: value as string,

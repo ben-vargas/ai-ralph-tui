@@ -76,6 +76,52 @@ interface LoadConfigResult {
 }
 
 /**
+ * Normalize legacy/malformed layouts where `defaultAgent` ended up inside
+ * an agent options table due TOML table ordering.
+ * @param config Parsed config object
+ * @returns Config with `defaultAgent` promoted to top-level when possible.
+ */
+function normalizeConfigAfterLoad(config: StoredConfig): StoredConfig {
+  if (typeof config.defaultAgent === 'string' && config.defaultAgent.length > 0) {
+    return config;
+  }
+
+  const agents = config.agents;
+  if (!Array.isArray(agents) || agents.length === 0) return config;
+
+  let promotedDefaultAgent: string | undefined;
+  let targetAgentIndex = -1;
+
+  for (let i = agents.length - 1; i >= 0; i -= 1) {
+    const optionValue = agents[i]?.options?.defaultAgent;
+    if (typeof optionValue === 'string' && optionValue.length > 0) {
+      promotedDefaultAgent = optionValue;
+      targetAgentIndex = i;
+      break;
+    }
+  }
+
+  if (!promotedDefaultAgent) return config;
+
+  const normalizedAgents = agents.map((agent, index) => {
+    if (!agent || index !== targetAgentIndex) return agent;
+
+    const options = agent.options;
+    const { defaultAgent: _defaultAgent, ...cleanedOptions } = options;
+    return {
+      ...agent,
+      options: cleanedOptions,
+    };
+  });
+
+  return {
+    ...config,
+    defaultAgent: promotedDefaultAgent,
+    agents: normalizedAgents,
+  };
+}
+
+/**
  * Load and validate a single TOML config file.
  * @param configPath Path to the config file
  * @returns Parsed and validated config, or empty object if file doesn't exist
@@ -99,7 +145,7 @@ async function loadConfigFile(configPath: string): Promise<LoadConfigResult> {
       return { config: {}, exists: true, errors: errorMsg };
     }
 
-    return { config: result.data as StoredConfig, exists: true };
+    return { config: normalizeConfigAfterLoad(result.data as StoredConfig), exists: true };
   } catch {
     // File doesn't exist or can't be read
     return { config: {}, exists: false };
@@ -871,7 +917,11 @@ export async function checkSetupStatus(
   const configPath = source.projectPath || source.globalPath;
 
   // Check if an agent is configured
-  const agentConfigured = !!(config.agent || config.defaultAgent);
+  const agentConfigured = !!(
+    config.agent ||
+    config.defaultAgent ||
+    (Array.isArray(config.agents) && config.agents.length > 0)
+  );
 
   if (!configExists) {
     return {

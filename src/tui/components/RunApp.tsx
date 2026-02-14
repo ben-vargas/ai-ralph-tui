@@ -48,7 +48,6 @@ import type {
 } from '../../engine/index.js';
 import type { TrackerTask } from '../../plugins/trackers/types.js';
 import type { StoredConfig, SubagentDetailLevel, SandboxConfig, SandboxMode } from '../../config/types.js';
-import type { AgentPluginMeta } from '../../plugins/agents/types.js';
 import type { TrackerPluginMeta } from '../../plugins/trackers/types.js';
 import { getIterationLogsByTask } from '../../logs/index.js';
 import type { SubagentTraceStats, SubagentHierarchyNode } from '../../logs/types.js';
@@ -103,8 +102,8 @@ export interface RunAppProps {
   onStart?: () => Promise<void>;
   /** Current stored configuration (for settings view) */
   storedConfig?: StoredConfig;
-  /** Available agent plugins (for settings view) */
-  availableAgents?: AgentPluginMeta[];
+  /** Available agent names (for settings view) */
+  availableAgents?: string[];
   /** Available tracker plugins (for settings view) */
   availableTrackers?: TrackerPluginMeta[];
   /** Callback when settings should be saved */
