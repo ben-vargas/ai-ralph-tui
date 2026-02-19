@@ -359,6 +359,12 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
 
     let tasks = tasksJson.map(brTaskToTask);
 
+    // Enrich tasks with dependency data from br dep list.
+    // br list --json only includes dependency_count/dependent_count but not
+    // the actual dependency IDs. Without this enrichment, the parallel executor's
+    // task graph sees all tasks as independent and dispatches them simultaneously.
+    await this.enrichDependencies(tasks, tasksJson);
+
     // Filter by parent (br list doesn't support --parent)
     // Always apply filter when parentId is set - empty childIds means no matching tasks
     if (parentId) {
@@ -443,6 +449,60 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
    * selection (dependency-aware), since br list output may not contain enough
    * dependency information for client-side readiness filtering.
    */
+  /**
+   * Enrich TrackerTask objects with dependency IDs from br dep list.
+   *
+   * br list --json only provides dependency_count/dependent_count but not the
+   * actual dependency/dependent IDs. This method fetches the full dependency
+   * info for tasks that have dependencies, so the parallel executor's task
+   * graph can correctly order execution groups.
+   *
+   * Only queries tasks where dependency_count > 0 to minimize br calls.
+   */
+  private async enrichDependencies(
+    tasks: TrackerTask[],
+    rawTasks: BrTaskJson[]
+  ): Promise<void> {
+    // Build a map of task ID → raw dependency_count for quick lookup
+    const depCountMap = new Map<string, number>();
+    for (const raw of rawTasks) {
+      if (typeof raw.dependency_count === 'number' && raw.dependency_count > 0) {
+        depCountMap.set(raw.id, raw.dependency_count);
+      }
+    }
+
+    // Fetch dependency details for tasks that have them
+    const enrichPromises = tasks
+      .filter((t) => depCountMap.has(t.id))
+      .map(async (task) => {
+        const { stdout, exitCode } = await execBr(
+          ['dep', 'list', task.id, '--json'],
+          this.workingDir
+        );
+
+        if (exitCode !== 0) return;
+
+        try {
+          const deps = JSON.parse(stdout) as BrDepListItem[];
+          const dependsOn: string[] = [];
+
+          for (const dep of deps) {
+            if (dep.type === 'blocks') {
+              dependsOn.push(dep.depends_on_id);
+            }
+          }
+
+          if (dependsOn.length > 0) {
+            task.dependsOn = dependsOn;
+          }
+        } catch {
+          // Silently skip enrichment failures — falls back to no-dep behavior
+        }
+      });
+
+    await Promise.all(enrichPromises);
+  }
+
   /**
    * Get child IDs for a parent epic/task.
    * Uses br dep list --direction up to get issues that depend on the parent
