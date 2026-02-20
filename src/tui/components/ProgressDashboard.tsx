@@ -54,6 +54,13 @@ export interface ProgressDashboardProps {
   activeWorkerCount?: number;
   /** Total number of parallel workers */
   totalWorkerCount?: number;
+  /** Aggregated token usage across all tasks in the current run */
+  aggregateUsage?: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    tasksWithUsage: number;
+  };
 }
 
 /**
@@ -63,6 +70,19 @@ function truncateText(text: string, maxWidth: number): string {
   if (text.length <= maxWidth) return text;
   if (maxWidth <= 3) return text.slice(0, maxWidth);
   return text.slice(0, maxWidth - 1) + '…';
+}
+
+/**
+ * Format token counts in a compact form for dashboard display.
+ */
+function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) {
+    return `${(tokens / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`;
+  }
+  if (tokens >= 1_000) {
+    return `${(tokens / 1_000).toFixed(1).replace(/\.0$/, '')}k`;
+  }
+  return String(tokens);
 }
 
 /**
@@ -140,6 +160,7 @@ export function ProgressDashboard({
   gitInfo,
   activeWorkerCount,
   totalWorkerCount,
+  aggregateUsage,
 }: ProgressDashboardProps): ReactNode {
   const statusDisplay = getStatusDisplay(status, currentTaskId);
   const sandboxDisplay = getSandboxDisplay(sandboxConfig, resolvedSandboxMode);
@@ -240,6 +261,17 @@ export function ProgressDashboard({
         <box style={{ flexDirection: 'row' }}>
           <text fg={colors.fg.secondary}>Tracker: </text>
           <text fg={colors.accent.tertiary}>{trackerName}</text>
+          {aggregateUsage && (
+            <>
+              <text fg={colors.fg.muted}> · </text>
+              <text fg={colors.fg.secondary}>Σ I/O/T: </text>
+              <text fg={colors.accent.secondary}>{formatTokenCount(aggregateUsage.inputTokens)}</text>
+              <text fg={colors.fg.muted}>/</text>
+              <text fg={colors.accent.primary}>{formatTokenCount(aggregateUsage.outputTokens)}</text>
+              <text fg={colors.fg.muted}>/</text>
+              <text fg={colors.status.info}>{formatTokenCount(aggregateUsage.totalTokens)}</text>
+            </>
+          )}
         </box>
 
         {/* Row 3: Git branch (own line) */}

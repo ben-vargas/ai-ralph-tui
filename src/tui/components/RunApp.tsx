@@ -976,6 +976,37 @@ export function RunApp({
   const displayMaxIterations = isViewingRemote ? remoteMaxIterations : maxIterations;
   const displayCurrentTaskId = isViewingRemote ? remoteCurrentTaskId : currentTaskId;
   const displayCurrentTaskTitle = isViewingRemote ? remoteCurrentTaskTitle : currentTaskTitle;
+  const displayAggregateUsage = useMemo(() => {
+    const usageMap = isViewingRemote ? remoteTaskUsageMap : taskUsageMap;
+    if (usageMap.size === 0) {
+      return undefined;
+    }
+
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let totalTokens = 0;
+    let tasksWithUsage = 0;
+
+    for (const usage of usageMap.values()) {
+      tasksWithUsage += 1;
+      inputTokens += usage.inputTokens ?? 0;
+      outputTokens += usage.outputTokens ?? 0;
+      totalTokens += usage.totalTokens > 0
+        ? usage.totalTokens
+        : (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+    }
+
+    if (tasksWithUsage === 0) {
+      return undefined;
+    }
+
+    return {
+      inputTokens,
+      outputTokens,
+      totalTokens,
+      tasksWithUsage,
+    };
+  }, [isViewingRemote, taskUsageMap, remoteTaskUsageMap]);
 
   // Compute display agent name - prefer active agent from engine state, fallback to config
   // For remote viewing, use remote active agent state, then remote config, then local config
@@ -3187,6 +3218,7 @@ export function RunApp({
           gitInfo={isViewingRemote ? remoteGitInfo : localGitInfo}
           activeWorkerCount={activeWorkerCount}
           totalWorkerCount={totalWorkerCount}
+          aggregateUsage={displayAggregateUsage}
         />
       )}
 
