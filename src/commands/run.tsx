@@ -594,9 +594,9 @@ Options:
   --sandbox=sandbox-exec  Force sandbox-exec (macOS)
   --no-sandbox        Disable sandboxing
   --no-network        Disable network access in sandbox
-  --serial            Force sequential execution (skip parallel analysis)
+  --serial            Force sequential execution (default behavior)
   --sequential        Alias for --serial
-  --parallel [N]      Force parallel execution with optional max workers (default: 3)
+  --parallel [N]      Force parallel execution with optional max workers (default workers: 3)
   --direct-merge      Merge directly to current branch (skip session branch creation)
   --task-range <range> Filter tasks by index (e.g., 1-5, 3-, -10)
   --listen            Enable remote listener (implies --headless)
@@ -642,8 +642,8 @@ function resolveParallelMode(
   if (options.serial) return 'never';
   if (options.parallel) return 'always';
 
-  // Fall back to stored config
-  return storedConfig?.parallel?.mode ?? 'auto';
+  // Fall back to stored config. Default to serial execution when unset.
+  return storedConfig?.parallel?.mode ?? 'never';
 }
 
 /**

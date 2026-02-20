@@ -13,7 +13,7 @@ Add a `[parallel]` section to your `.ralph-tui/config.toml`:
 
 ```toml
 [parallel]
-mode = "auto"                           # auto | always | never
+mode = "never"                          # auto | always | never
 maxWorkers = 3                          # Maximum concurrent workers
 directMerge = false                     # Merge directly to current branch (vs session branch)
 ```
@@ -22,10 +22,10 @@ directMerge = false                     # Merge directly to current branch (vs s
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `mode` | string | `"auto"` | Execution mode: `auto` analyzes dependencies, `always` forces parallel, `never` disables |
+| `mode` | string | `"never"` | Execution mode: `auto` analyzes dependencies, `always` forces parallel, `never` disables |
 | `maxWorkers` | number | `3` | Maximum concurrent workers (worktrees) |
 | `directMerge` | boolean | `false` | If true, merge directly to current branch; if false (default), create a session branch |
-| `worktreeDir` | string | `"../.ralph-worktrees/<project>"` | Directory for git worktrees (as sibling of project) |
+| `worktreeDir` | string | `".ralph-tui/worktrees"` | Directory for git worktrees (relative to project root) |
 
 ### Mode Behavior
 
@@ -70,17 +70,24 @@ Configuration is resolved in this order (highest priority first):
 
 1. **CLI flags** — `--serial` or `--parallel N`
 2. **Config file** — `[parallel]` section in `.ralph-tui/config.toml`
-3. **Auto-detection** — analyze task graph and decide automatically
+3. **Built-in default** — `mode = "never"` (sequential execution)
 
 ## Examples
 
 ### Minimal Config
 
-Most projects can rely on auto-detection with no configuration:
+No parallel config means sequential-by-default execution:
 
 ```bash
-# Just run — parallel activates when beneficial
+# Just run (sequential by default)
 ralph-tui run
+```
+
+To enable automatic parallel detection:
+
+```toml
+[parallel]
+mode = "auto"
 ```
 
 ### High-Parallelism Setup

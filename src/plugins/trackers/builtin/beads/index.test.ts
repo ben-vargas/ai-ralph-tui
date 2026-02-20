@@ -444,6 +444,100 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(tasks[0]?.blocks).toEqual(['child1']);
     });
 
+    test('enriches dependencies when bd list only provides dependency_count', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              id: 't1',
+              title: 'Task',
+              status: 'open',
+              priority: 2,
+              dependency_count: 1,
+            },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { issue_id: 't1', depends_on_id: 'dep1', type: 'blocks' },
+          ]),
+        },
+      ];
+
+      const tasks = await plugin.getTasks();
+
+      expect(tasks[0]?.dependsOn).toEqual(['dep1']);
+      expect(mockSpawnArgs.map((c) => c.args)).toEqual([
+        ['list', '--json', '--all', '--limit', '0'],
+        ['dep', 'list', 't1', '--json'],
+      ]);
+    });
+
+    test('merges enriched dependencies with existing dependencies and deduplicates', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              id: 't1',
+              title: 'Task',
+              status: 'open',
+              priority: 2,
+              dependency_count: 2,
+              dependencies: [
+                { id: 'dep1', title: 'Dep', status: 'open', dependency_type: 'blocks' },
+              ],
+            },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { issue_id: 't1', depends_on_id: 'dep1', type: 'blocks' },
+            { issue_id: 't1', depends_on_id: 'dep2', type: 'blocks' },
+          ]),
+        },
+      ];
+
+      const tasks = await plugin.getTasks();
+
+      expect(tasks[0]?.dependsOn).toEqual(['dep1', 'dep2']);
+    });
+
+    test('ignores reverse-direction and self-referential dep list rows', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              id: 't1',
+              title: 'Task',
+              status: 'open',
+              priority: 2,
+              dependency_count: 1,
+            },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { issue_id: 'other', depends_on_id: 't1', type: 'blocks' },
+            { issue_id: 't1', depends_on_id: 't1', type: 'blocks' },
+            { issue_id: 't1', depends_on_id: 'dep-real', type: 'blocks' },
+          ]),
+        },
+      ];
+
+      const tasks = await plugin.getTasks();
+
+      expect(tasks[0]?.dependsOn).toEqual(['dep-real']);
+    });
+
     test('returns empty array when bd list fails', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [{ exitCode: 1, stderr: 'list error' }];

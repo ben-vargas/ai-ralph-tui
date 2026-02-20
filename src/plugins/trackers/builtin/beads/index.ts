@@ -56,6 +56,19 @@ interface BeadJson {
 }
 
 /**
+ * Output structure from bd dep list --json.
+ *
+ * Some bd versions serialize relationship type as "dependency_type" while
+ * others use "type". We accept both to stay compatible.
+ */
+interface BdDepListItem {
+  issue_id?: string;
+  depends_on_id?: string;
+  type?: 'blocks' | 'parent-child';
+  dependency_type?: 'blocks' | 'parent-child';
+}
+
+/**
  * Result of detect() operation.
  */
 interface DetectResult {
@@ -403,7 +416,91 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     const filterWithoutParent = filter ? { ...filter, parentId: undefined } : undefined;
     tasks = this.filterTasks(tasks, filterWithoutParent);
 
+    // Enrich dependencies after filtering so we only query tasks that will be used.
+    await this.enrichDependencies(tasks, beads);
+
     return tasks;
+  }
+
+  /**
+   * Enrich TrackerTask objects with dependency IDs from bd dep list.
+   *
+   * bd list --json may omit actual dependency IDs and provide only counts in
+   * dependency_count/dependent_count. This enrichment restores dependency edges
+   * needed for accurate parallel graph analysis.
+   */
+  private async enrichDependencies(
+    tasks: TrackerTask[],
+    rawBeads: BeadJson[]
+  ): Promise<void> {
+    const depCountMap = new Map<string, number>();
+    for (const raw of rawBeads) {
+      if (typeof raw.dependency_count === 'number' && raw.dependency_count > 0) {
+        depCountMap.set(raw.id, raw.dependency_count);
+      }
+    }
+
+    const tasksToEnrich = tasks.filter((t) => depCountMap.has(t.id));
+    if (tasksToEnrich.length === 0) {
+      return;
+    }
+
+    // Limit concurrency to avoid spawning too many bd subprocesses at once.
+    const maxConcurrentEnrichCalls = 8;
+
+    for (let i = 0; i < tasksToEnrich.length; i += maxConcurrentEnrichCalls) {
+      const batch = tasksToEnrich.slice(i, i + maxConcurrentEnrichCalls);
+      await Promise.all(batch.map((task) => this.enrichTaskDependencies(task)));
+    }
+  }
+
+  /**
+   * Populate dependsOn for a single task from bd dep list output.
+   */
+  private async enrichTaskDependencies(task: TrackerTask): Promise<void> {
+    const { stdout, stderr, exitCode } = await execBd(
+      ['dep', 'list', task.id, '--json'],
+      this.workingDir
+    );
+
+    if (exitCode !== 0) {
+      console.warn(
+        `Dependency enrichment failed for task ${task.id}: bd dep list exited non-zero`,
+        { taskId: task.id, exitCode, stdout, stderr }
+      );
+      return;
+    }
+
+    try {
+      const deps = JSON.parse(stdout) as BdDepListItem[];
+      const dependsOn: string[] = [];
+
+      for (const dep of deps) {
+        const depType = dep.type ?? dep.dependency_type;
+
+        // dep list can include reverse-direction rows. Keep only dependencies
+        // where the current task is the dependent issue.
+        if (
+          depType === 'blocks' &&
+          dep.issue_id === task.id &&
+          dep.depends_on_id &&
+          dep.depends_on_id !== task.id
+        ) {
+          dependsOn.push(dep.depends_on_id);
+        }
+      }
+
+      if (dependsOn.length > 0) {
+        const mergedDependsOn = [...(task.dependsOn ?? []), ...dependsOn];
+        task.dependsOn = [...new Set(mergedDependsOn)];
+      }
+    } catch (error) {
+      console.warn(
+        `Dependency enrichment failed for task ${task.id}: unable to parse bd dep list output`,
+        { taskId: task.id, error, stdout }
+      );
+      // Fall back to existing dependency data when enrichment parsing fails.
+    }
   }
 
   override async getTask(id: string): Promise<TrackerTask | undefined> {

@@ -257,10 +257,10 @@ All remote actions are logged to `~/.config/ralph-tui/audit.log`:
 
 ## Parallel Execution
 
-By default, ralph-tui analyzes task dependencies and automatically runs independent tasks in parallel when beneficial. Each parallel worker runs in its own git worktree for full isolation.
+By default, ralph-tui runs sequentially. Parallel execution is opt-in via `--parallel` or configuration (`parallel.mode = "auto"` or `parallel.mode = "always"`). Each parallel worker runs in its own git worktree for full isolation.
 
 ```bash
-# Auto-detect (default) — parallel when beneficial
+# Default behavior (sequential)
 ralph-tui run --prd ./prd.json
 
 # Force parallel with 4 workers
@@ -269,6 +269,8 @@ ralph-tui run --prd ./prd.json --parallel 4
 # Force sequential (disable parallel)
 ralph-tui run --prd ./prd.json --serial
 ```
+
+To enable automatic parallel detection on normal `run` invocations, set `parallel.mode = "auto"` in your config.
 
 When parallel mode is active, the TUI shows additional views:
 - Press `w` to toggle the workers view

@@ -8,7 +8,7 @@ description: Run independent tasks simultaneously using git worktree isolation f
 Ralph TUI can execute independent tasks in parallel, using **git worktrees** to isolate each worker's changes. When tasks have no mutual dependencies, they run simultaneously — then merge back to your main branch sequentially.
 
 <Callout type="tip">
-  Parallel execution activates automatically when ralph-tui detects independent tasks. No configuration required for the default behavior.
+  Default behavior is sequential execution. Use `--parallel` to force parallel mode, or set `parallel.mode = "auto"` to enable automatic detection.
 </Callout>
 
 ## Why Parallel?
@@ -26,7 +26,7 @@ With parallel execution:
 ## Quick Start
 
 ```bash
-# Auto-detect parallelism (default behavior)
+# Default behavior (sequential)
 ralph-tui run
 
 # Force parallel execution with 4 workers
@@ -36,7 +36,7 @@ ralph-tui run --parallel 4
 ralph-tui run --serial
 ```
 
-When ralph-tui starts, it analyzes your task dependencies and determines whether parallel execution is beneficial. If it finds groups of independent tasks, it automatically switches to parallel mode.
+When `parallel.mode = "auto"`, ralph-tui analyzes your task dependencies and determines whether parallel execution is beneficial. If it finds groups of independent tasks, it switches to parallel mode.
 
 ## How It Decides
 
@@ -46,7 +46,7 @@ The auto-detection heuristic checks three conditions:
 2. **At least 3 total tasks** (overhead isn't worth it for just 2)
 3. **Less than 50% cyclic dependencies** (heavily coupled tasks don't parallelize well)
 
-If all conditions are met, parallel mode activates. Otherwise, ralph-tui falls back to sequential execution.
+If all conditions are met, parallel mode activates. Otherwise, ralph-tui stays in sequential execution.
 
 ## What Happens
 

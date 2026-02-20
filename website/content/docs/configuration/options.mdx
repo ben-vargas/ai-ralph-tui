@@ -418,21 +418,21 @@ sound = "off"
 
 ## Parallel Execution
 
-Configure automatic parallel execution behavior.
+Configure parallel execution behavior.
 
 ```toml
 [parallel]
-mode = "auto"
+mode = "never"
 maxWorkers = 3
 directMerge = false
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `mode` | string | `"auto"` | Execution mode |
+| `mode` | string | `"never"` | Execution mode |
 | `maxWorkers` | number | `3` | Maximum concurrent workers |
 | `directMerge` | boolean | `false` | Merge directly to current branch (vs session branch) |
-| `worktreeDir` | string | `"../.ralph-worktrees/<project>"` | Directory for git worktrees |
+| `worktreeDir` | string | `".ralph-tui/worktrees"` | Directory for git worktrees |
 
 ### Mode Values
 
