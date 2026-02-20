@@ -514,7 +514,13 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       this.workingDir
     );
 
-    if (exitCode !== 0) return;
+    if (exitCode !== 0) {
+      console.warn(
+        `Dependency enrichment failed for task ${task.id}: br dep list exited non-zero`,
+        { taskId: task.id, exitCode, stdout }
+      );
+      return;
+    }
 
     try {
       const deps = JSON.parse(stdout) as BrDepListItem[];
@@ -536,8 +542,12 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
         const mergedDependsOn = [...(task.dependsOn ?? []), ...dependsOn];
         task.dependsOn = [...new Set(mergedDependsOn)];
       }
-    } catch {
-      // Silently skip enrichment failures — falls back to no-dep behavior
+    } catch (error) {
+      console.warn(
+        `Dependency enrichment failed for task ${task.id}: unable to parse br dep list output`,
+        { taskId: task.id, error, stdout }
+      );
+      // Fall back to existing dependency data when enrichment parsing fails.
     }
   }
 
