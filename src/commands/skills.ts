@@ -409,7 +409,9 @@ async function handleInstallSkills(args: string[]): Promise<void> {
     }
     if (result.eloopOnly) {
       console.log(`  ${DIM}(Some agents share skill directories via symlinks — skills already accessible)${RESET}`);
-      console.log(`  ${DIM}(If you need physical files instead, rerun with: ralph-tui skills install --copy)${RESET}`);
+      if (!options.copy) {
+        console.log(`  ${DIM}(If you need physical files instead, rerun with: ralph-tui skills install --copy)${RESET}`);
+      }
     }
   } else if (exitCode !== 0) {
     console.error(`${RED}✗${RESET} Installation failed`);

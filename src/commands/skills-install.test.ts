@@ -127,6 +127,18 @@ describe('skills install command (spawn)', () => {
     expect(allOutput).toContain('symlinks');
   });
 
+  test('does not suggest --copy again when copy mode is already active', async () => {
+    mockSpawnStdout = 'Found 4 skills\nDetected 1 agent\nInstalling to: Kiro CLI\nInstallation complete\nFailed to install 1\n';
+    mockSpawnStderr = 'ELOOP: too many symbolic links encountered\n';
+    mockSpawnExitCode = 1;
+
+    await executeSkillsCommand(['install', '--copy']);
+
+    const allOutput = consoleSpy.mock.calls.map((c: unknown[]) => c[0]).join('\n');
+    expect(allOutput).toContain('symlinks');
+    expect(allOutput).not.toContain('ralph-tui skills install --copy');
+  });
+
   test('falls back to parsed installing list count when detected count is missing', async () => {
     mockSpawnStdout = 'Found 4 skills\nInstalling to: OpenCode [global]\nInstallation complete\n';
     mockSpawnExitCode = 0;
