@@ -273,9 +273,9 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             return this.delegate.getNextTask(filter);
         }
 
-        try {
-            const statusFilter = this.normalizeStatusFilter(filter?.status);
+        const statusFilter = this.normalizeStatusFilter(filter?.status);
 
+        try {
             // --robot-next only returns actionable tasks (open/in_progress).
             // If a caller asks for only non-actionable statuses, there is no
             // valid --robot-next result by definition.
@@ -285,7 +285,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
                     (status) => status === 'open' || status === 'in_progress'
                 )
             ) {
-                return this.delegate.getNextTask(filter);
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             const args = ['--robot-next'];
@@ -304,7 +304,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
 
             if (exitCode !== 0) {
                 console.error('bv --robot-next failed:', stderr);
-                return this.delegate.getNextTask(filter);
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             let nextOutputRaw: unknown;
@@ -312,12 +312,12 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
                 nextOutputRaw = JSON.parse(stdout) as BvRobotNextOutput;
             } catch (err) {
                 console.error('Failed to parse bv --robot-next output:', err);
-                return this.delegate.getNextTask(filter);
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             if (hasMessageField(nextOutputRaw)) {
                 // No actionable items.
-                return this.delegate.getNextTask(filter);
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             if (!hasValidTaskId(nextOutputRaw)) {
@@ -325,7 +325,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
                     'Invalid bv --robot-next output (missing task id):',
                     nextOutputRaw
                 );
-                return this.delegate.getNextTask(filter);
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             const nextOutput = nextOutputRaw as BvRobotNextTask;
@@ -336,10 +336,10 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             if (epicFilter) {
                 const fullTask = await this.delegate.getTask(nextOutput.id);
                 if (!fullTask || fullTask.parentId !== epicFilter) {
-                    return this.delegate.getNextTask(filter);
+                    return this.delegateGetNextTaskFiltered(filter, statusFilter);
                 }
                 if (statusFilter && !statusFilter.includes(fullTask.status)) {
-                    return this.delegate.getNextTask(filter);
+                    return this.delegateGetNextTaskFiltered(filter, statusFilter);
                 }
                 // Augment and return.
                 fullTask.metadata = {
@@ -359,7 +359,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             const fullTask = await this.delegate.getTask(nextOutput.id);
             if (fullTask) {
                 if (statusFilter && !statusFilter.includes(fullTask.status)) {
-                    return this.delegate.getNextTask(filter);
+                    return this.delegateGetNextTaskFiltered(filter, statusFilter);
                 }
                 fullTask.metadata = {
                     ...fullTask.metadata,
@@ -371,7 +371,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             }
 
             if (statusFilter && !statusFilter.includes('open')) {
-                return this.delegate.getNextTask(filter);
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             // Fallback: construct minimal task from robot-next output.
@@ -388,7 +388,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             };
         } catch (err) {
             console.error('Error in BeadsRustBvTrackerPlugin.getNextTask:', err);
-            return this.delegate.getNextTask(filter);
+            return this.delegateGetNextTaskFiltered(filter, statusFilter);
         }
     }
 
@@ -517,6 +517,9 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
                             typeof (rec as BvTriageRecommendation).id === 'string'
                     );
                     this.lastTriageOutput = parsed;
+                    // Only update timestamp when we got valid, parsed data
+                    // so parse failures don't suppress retries via the rate limiter.
+                    this.lastTriageRefreshAt = Date.now();
                 } else {
                     this.lastTriageOutput = { triage: { recommendations: [] } };
                 }
@@ -524,9 +527,6 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
                 // Ignore parse errors — fall back to empty recommendations.
                 this.lastTriageOutput = { triage: { recommendations: [] } };
             }
-            // Only update timestamp on success so failed refreshes don't
-            // suppress retries via the rate limiter.
-            this.lastTriageRefreshAt = Date.now();
         } else {
             // Non-zero exit: treat as empty to avoid stale data.
             this.lastTriageOutput = { triage: { recommendations: [] } };
@@ -549,6 +549,21 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
         }
 
         return Array.isArray(statusFilter) ? statusFilter : [statusFilter];
+    }
+
+    /**
+     * Delegate to beads-rust getNextTask, then validate the returned task's
+     * status against statusFilter. Returns undefined if no matching task.
+     */
+    private async delegateGetNextTaskFiltered(
+        filter?: TaskFilter,
+        statusFilter?: TrackerTaskStatus[]
+    ): Promise<TrackerTask | undefined> {
+        const task = await this.delegate.getNextTask(filter);
+        if (task && statusFilter && !statusFilter.includes(task.status)) {
+            return undefined;
+        }
+        return task;
     }
 
     private scheduleTriageRefresh(force = false): void {
