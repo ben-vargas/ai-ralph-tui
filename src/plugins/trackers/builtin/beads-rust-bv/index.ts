@@ -81,11 +81,14 @@ export interface BeadsRustBvDetectResult extends BeadsRustDetectResult {
 /**
  * Execute a bv command and return stdout/stderr/exitCode.
  */
+const EXEC_BV_TIMEOUT_MS = 15_000;
+
 async function execBv(
     args: string[],
     cwd?: string
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     return new Promise((resolve) => {
+        let resolved = false;
         const proc = spawn('bv', args, {
             cwd,
             env: { ...process.env },
@@ -94,6 +97,15 @@ async function execBv(
 
         let stdout = '';
         let stderr = '';
+
+        const timer = setTimeout(() => {
+            if (!resolved) {
+                resolved = true;
+                stderr += `\nbv timed out after ${EXEC_BV_TIMEOUT_MS}ms`;
+                proc.kill('SIGKILL');
+                resolve({ stdout, stderr, exitCode: 1 });
+            }
+        }, EXEC_BV_TIMEOUT_MS);
 
         proc.stdout.on('data', (data: Buffer) => {
             stdout += data.toString();
@@ -104,12 +116,20 @@ async function execBv(
         });
 
         proc.on('close', (code) => {
-            resolve({ stdout, stderr, exitCode: code ?? 1 });
+            clearTimeout(timer);
+            if (!resolved) {
+                resolved = true;
+                resolve({ stdout, stderr, exitCode: code ?? 1 });
+            }
         });
 
         proc.on('error', (err) => {
-            stderr += err.message;
-            resolve({ stdout, stderr, exitCode: 1 });
+            clearTimeout(timer);
+            if (!resolved) {
+                resolved = true;
+                stderr += err.message;
+                resolve({ stdout, stderr, exitCode: 1 });
+            }
         });
     });
 }
