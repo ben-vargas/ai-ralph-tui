@@ -308,6 +308,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
 
   /** Task list cache */
   private tasksCache: TrackerTask[] | null = null;
+  private tasksCacheParentId: string | null = null;
   private tasksCacheTime: number = 0;
   private readonly TASKS_CACHE_TTL_MS = 30_000;
 
@@ -360,7 +361,11 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
 
     // Check cache
     const now = Date.now();
-    if (this.tasksCache && now - this.tasksCacheTime < this.TASKS_CACHE_TTL_MS) {
+    if (
+      this.tasksCache &&
+      this.tasksCacheParentId === parentId &&
+      now - this.tasksCacheTime < this.TASKS_CACHE_TTL_MS
+    ) {
       return this.filterTasks(this.tasksCache, filter);
     }
 
@@ -379,6 +384,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
 
       // Update cache
       this.tasksCache = tasks;
+      this.tasksCacheParentId = parentId;
       this.tasksCacheTime = now;
 
       return this.filterTasks(tasks, filter);
@@ -458,6 +464,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
 
       // Invalidate caches
       this.tasksCache = null;
+      this.transitionsCache.delete(id);
 
       return this.getTask(id);
     } catch (err) {
@@ -490,6 +497,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
 
       // Invalidate caches (do this before post-transition ops)
       this.tasksCache = null;
+      this.transitionsCache.delete(id);
 
       // Post-transition operations: add completion comment
       // These are non-critical, so we wrap separately and return success with warning

@@ -1,6 +1,6 @@
 /**
  * ABOUTME: Convert command for ralph-tui.
- * Converts PRD markdown files to prd.json, Beads, or Linear format.
+ * Converts PRD markdown files to prd.json, Beads, Linear, or Jira format.
  */
 
 import { readFile, writeFile, access, constants, mkdir } from 'node:fs/promises';
@@ -1169,8 +1169,9 @@ export async function executeJiraConversion(
     // Fetch project metadata to get issue types
     const response = await client.request<{ issueTypes: { id: string; name: string }[] }>('GET', `/rest/api/3/project/${encodeURIComponent(projectKey)}`);
     for (const issueType of response.issueTypes) {
-      if (issueType.name === 'Epic') epicTypeId = issueType.id;
-      if (issueType.name === 'Story') storyTypeId = issueType.id;
+      const typeName = issueType.name.trim().toLowerCase();
+      if (typeName === 'epic') epicTypeId = issueType.id;
+      if (typeName === 'story' || typeName === 'user story') storyTypeId = issueType.id;
     }
     if (!epicTypeId) {
       printError(`No 'Epic' issue type found in project ${projectKey}`);

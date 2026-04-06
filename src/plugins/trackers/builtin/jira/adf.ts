@@ -253,14 +253,22 @@ function renderBlockquote(node: AdfNode): string {
 function renderTable(node: AdfNode): string {
   if (!node.content || node.content.length === 0) return '';
 
-  const rows = node.content
+  interface RowData {
+    markdown: string;
+    columnCount: number;
+  }
+
+  const rows: RowData[] = node.content
     .filter((row) => row.type === 'tableRow')
     .map((row) => {
       const cells = (row.content ?? []).map((cell) => {
         const content = cell.content ? renderNodes(cell.content).trim() : '';
         return content.replace(/\|/g, '\\|'); // Escape pipes in cell content
       });
-      return `| ${cells.join(' | ')} |`;
+      return {
+        markdown: `| ${cells.join(' | ')} |`,
+        columnCount: cells.length,
+      };
     });
 
   if (rows.length === 0) return '';
@@ -268,12 +276,11 @@ function renderTable(node: AdfNode): string {
   // Insert separator after first row (header)
   const firstRow = rows[0];
   if (firstRow) {
-    const colCount = (firstRow.match(/\|/g)?.length ?? 1) - 1;
-    const separator = `|${' --- |'.repeat(colCount)}`;
-    rows.splice(1, 0, separator);
+    const separator = `|${' --- |'.repeat(firstRow.columnCount)}`;
+    rows.splice(1, 0, { markdown: separator, columnCount: firstRow.columnCount });
   }
 
-  return rows.join('\n') + '\n\n';
+  return rows.map((row) => row.markdown).join('\n') + '\n\n';
 }
 
 /**
@@ -324,7 +331,11 @@ function renderPanel(node: AdfNode): string {
   const panelType = (node.attrs?.panelType as string) ?? 'info';
   const content = node.content ? renderNodes(node.content).trim() : '';
   const prefix = panelType.charAt(0).toUpperCase() + panelType.slice(1);
-  return `> **${prefix}:** ${content}\n\n`;
+  const quoted = content
+    .split('\n')
+    .map((line, index) => (index === 0 ? `> **${prefix}:** ${line}` : `> ${line}`))
+    .join('\n');
+  return `${quoted}\n\n`;
 }
 
 /**
