@@ -440,7 +440,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
       const transitions = await this.getCachedTransitions(id);
 
       // Prefer exact status name match, fall back to category match
-      const statusNameLower = status.replace('_', ' ').toLowerCase();
+      const statusNameLower = status.replaceAll('_', ' ').toLowerCase();
       let target = transitions.find((t) => t.name.toLowerCase() === statusNameLower);
 
       if (!target) {
