@@ -267,8 +267,14 @@ describe('formatToolCall', () => {
     const longContent = 'x'.repeat(300);
     const result = formatToolCall('write', { body: longContent } as unknown as Parameters<typeof formatToolCall>[1]);
     expect(result).toContain('[write]');
-    // Long value should be skipped, only tool name shown
+    // Unknown keys should not be shown as fallback content.
     expect(result).not.toContain('xxx');
+  });
+
+  test('fallback ignores arbitrary unknown string fields', () => {
+    const result = formatToolCall('custom_tool', { token: 'super-secret-token' } as unknown as Parameters<typeof formatToolCall>[1]);
+    expect(result).toContain('[custom_tool]');
+    expect(result).not.toContain('super-secret-token');
   });
 
   test('combines all supported fields', () => {
@@ -412,5 +418,12 @@ describe('formatToolCallSegments fallback', () => {
     // file_path is a known field, should use normal formatting (purple color) not fallback (muted)
     const muted = segments.filter(s => s.color === 'muted');
     expect(muted.length).toBe(0);
+  });
+
+  test('does not show arbitrary unknown string fields', () => {
+    const segments = formatToolCallSegments('custom_tool', { token: 'super-secret-token' } as Record<string, unknown>);
+    const text = segmentsToPlainText(segments);
+    expect(text).toContain('[custom_tool]');
+    expect(text).not.toContain('super-secret-token');
   });
 });

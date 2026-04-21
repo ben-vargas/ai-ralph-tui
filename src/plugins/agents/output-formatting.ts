@@ -141,28 +141,30 @@ export interface ToolInputFormatters {
   new_string?: string;
 }
 
+const FALLBACK_DISPLAY_KEYS = ['filename', 'fileName', 'filepath', 'filePath', 'patch'] as const;
+
 /**
  * Extract a fallback display string from tool input when no known fields matched.
- * Looks for the first string value that looks useful (file paths, names, etc.).
+ * Only considers known non-standard keys to avoid exposing arbitrary input values.
  * Long values are truncated to 120 chars for display.
  */
 function extractFallbackDisplay(input: Record<string, unknown>): string | undefined {
-  // Priority: look for path-like values first, then any short string
+  // Priority: look for path-like values first, then any other known-safe fallback keys.
   let bestPath: string | undefined;
-  let bestShort: string | undefined;
+  let bestValue: string | undefined;
 
-  for (const [, value] of Object.entries(input)) {
+  for (const key of FALLBACK_DISPLAY_KEYS) {
+    const value = input[key];
     if (typeof value !== 'string' || value.length === 0) continue;
 
-    // Path-like values get priority
     if (value.startsWith('/') || value.startsWith('./') || value.startsWith('~')) {
       if (!bestPath) bestPath = value;
-    } else if (!bestShort) {
-      bestShort = value;
+    } else if (!bestValue) {
+      bestValue = value;
     }
   }
 
-  const result = bestPath ?? bestShort;
+  const result = bestPath ?? bestValue;
   if (!result) return undefined;
 
   // Truncate if needed
