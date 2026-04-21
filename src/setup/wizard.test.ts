@@ -131,7 +131,9 @@ describe('wizard', () => {
     }));
 
     // Mock tracker registry
-    const actualTrackerRegistryModule = await import('../plugins/trackers/registry.js');
+    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+    const actualTrackerRegistryModule =
+      (await import('../plugins/trackers/registry.js?test-reload-wizard-tracker-registry')) as typeof import('../plugins/trackers/registry.js');
     mock.module('../plugins/trackers/registry.js', () => ({
       ...actualTrackerRegistryModule,
       getTrackerRegistry: () => ({
@@ -149,7 +151,9 @@ describe('wizard', () => {
     }));
 
     // Mock the agent registry to return our mock instance
-    const actualAgentRegistryModule = await import('../plugins/agents/registry.js');
+    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+    const actualAgentRegistryModule =
+      (await import('../plugins/agents/registry.js?test-reload-wizard-agent-registry')) as typeof import('../plugins/agents/registry.js');
     mock.module('../plugins/agents/registry.js', () => ({
       ...actualAgentRegistryModule,
       getAgentRegistry: () => ({

@@ -17,7 +17,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const actualAgentRegistryModule = await import('../plugins/agents/registry.js');
+// @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+const actualAgentRegistryModule =
+  (await import('../plugins/agents/registry.js?test-reload-create-prd-registry')) as typeof import('../plugins/agents/registry.js');
 
 // Mock agent instance
 const createMockAgentInstance = () => ({

@@ -25,8 +25,12 @@ import {
   createDetectResult,
 } from '../mocks/agent-responses.js';
 
-const actualAgentRegistryModule = await import('../../src/plugins/agents/registry.js');
-const actualTrackerRegistryModule = await import('../../src/plugins/trackers/registry.js');
+// @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+const actualAgentRegistryModule =
+  (await import('../../src/plugins/agents/registry.js?test-reload-execution-engine-agent-registry')) as typeof import('../../src/plugins/agents/registry.js');
+// @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+const actualTrackerRegistryModule =
+  (await import('../../src/plugins/trackers/registry.js?test-reload-execution-engine-tracker-registry')) as typeof import('../../src/plugins/trackers/registry.js');
 
 // Mock the registry modules
 const mockAgentInstance = createMockAgentPlugin();
