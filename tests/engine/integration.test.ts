@@ -220,15 +220,20 @@ describe('ExecutionEngine Integration', () => {
     // Reset mocks for each test
     mockAgentRegistry = createControllableAgent();
     mockTrackerRegistry = createControllableTracker();
+
+    const actualAgentRegistryModule = await import('../../src/plugins/agents/registry.js');
+    const actualTrackerRegistryModule = await import('../../src/plugins/trackers/registry.js');
     
     // Mock the modules
     mock.module('../../src/plugins/agents/registry.js', () => ({
+      ...actualAgentRegistryModule,
       getAgentRegistry: () => ({
         getInstance: () => Promise.resolve(mockAgentRegistry.agent),
       }),
     }));
 
     mock.module('../../src/plugins/trackers/registry.js', () => ({
+      ...actualTrackerRegistryModule,
       getTrackerRegistry: () => ({
         getInstance: () => Promise.resolve(mockTrackerRegistry.tracker),
       }),

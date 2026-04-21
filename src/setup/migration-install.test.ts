@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
+const actualAgentRegistryModule = await import('../plugins/agents/registry.js');
+
 let mockInstallResult = { success: true, output: '' };
 let mockAgentAvailable = true;
 
@@ -27,6 +29,7 @@ mock.module('../plugins/agents/builtin/index.js', () => ({
 }));
 
 mock.module('../plugins/agents/registry.js', () => ({
+  ...actualAgentRegistryModule,
   getAgentRegistry: () => ({
     getRegisteredPlugins: () => [
       {

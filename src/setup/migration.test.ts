@@ -101,7 +101,9 @@ beforeAll(async () => {
     registerBuiltinAgents: () => {},
   }));
 
+  const actualAgentRegistryModule = await import('../plugins/agents/registry.js');
   mock.module('../plugins/agents/registry.js', () => ({
+    ...actualAgentRegistryModule,
     getAgentRegistry: () => ({
       getRegisteredPlugins: () => [
         {
@@ -314,4 +316,3 @@ describe('CURRENT_CONFIG_VERSION', () => {
     expect(CURRENT_CONFIG_VERSION).toBe('2.1');
   });
 });
-

@@ -131,7 +131,9 @@ describe('wizard', () => {
     }));
 
     // Mock tracker registry
+    const actualTrackerRegistryModule = await import('../plugins/trackers/registry.js');
     mock.module('../plugins/trackers/registry.js', () => ({
+      ...actualTrackerRegistryModule,
       getTrackerRegistry: () => ({
         initialize: () => Promise.resolve(),
         getRegisteredPlugins: () => trackerPluginMeta,
@@ -147,7 +149,9 @@ describe('wizard', () => {
     }));
 
     // Mock the agent registry to return our mock instance
+    const actualAgentRegistryModule = await import('../plugins/agents/registry.js');
     mock.module('../plugins/agents/registry.js', () => ({
+      ...actualAgentRegistryModule,
       getAgentRegistry: () => ({
         getInstance: () => Promise.resolve(createMockAgentInstance('claude', 'Claude Code')),
         initialize: () => Promise.resolve(),

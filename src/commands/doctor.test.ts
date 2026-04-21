@@ -17,6 +17,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+const actualAgentRegistryModule = await import('../plugins/agents/registry.js');
+
 // Types for mock results
 interface MockDetectResult {
   available: boolean;
@@ -49,6 +51,7 @@ const createMockAgentInstance = () => ({
 
 // Mock the agent registry
 mock.module('../plugins/agents/registry.js', () => ({
+  ...actualAgentRegistryModule,
   getAgentRegistry: () => ({
     getInstance: (config: unknown) => {
       lastGetInstanceConfig = config;
