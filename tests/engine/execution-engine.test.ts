@@ -25,6 +25,9 @@ import {
   createDetectResult,
 } from '../mocks/agent-responses.js';
 
+const realAgentRegistryModule = await import('../../src/plugins/agents/registry.js');
+const realTrackerRegistryModule = await import('../../src/plugins/trackers/registry.js');
+
 // Mock the registry modules
 const mockAgentInstance = createMockAgentPlugin();
 const mockTrackerInstance: Partial<TrackerPlugin> = {
@@ -45,12 +48,14 @@ const mockUpdateSessionMaxIterations = mock(() => Promise.resolve());
 
 // Override module imports
 mock.module('../../src/plugins/agents/registry.js', () => ({
+  ...realAgentRegistryModule,
   getAgentRegistry: () => ({
     getInstance: () => Promise.resolve(mockAgentInstance),
   }),
 }));
 
 mock.module('../../src/plugins/trackers/registry.js', () => ({
+  ...realTrackerRegistryModule,
   getTrackerRegistry: () => ({
     getInstance: () => Promise.resolve(mockTrackerInstance),
   }),
