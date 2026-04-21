@@ -43,4 +43,32 @@ describe('preserveCurrentSessionCompletions', () => {
 
     expect(result[0]?.status).toBe('closed');
   });
+
+  test('passes through newly discovered tasks unchanged', () => {
+    const previousTasks: TaskItem[] = [
+      createTaskItem('task-1', 'done'),
+    ];
+    const refreshedTasks: TaskItem[] = [
+      createTaskItem('task-1', 'closed'),
+      createTaskItem('task-2', 'actionable'),
+    ];
+
+    const result = preserveCurrentSessionCompletions(previousTasks, refreshedTasks);
+
+    expect(result).toHaveLength(2);
+    expect(result[1]).toEqual(createTaskItem('task-2', 'actionable'));
+  });
+
+  test('keeps refreshed regressed statuses instead of coercing them back to done', () => {
+    const previousTasks: TaskItem[] = [
+      createTaskItem('task-1', 'done'),
+    ];
+    const refreshedTasks: TaskItem[] = [
+      createTaskItem('task-1', 'active'),
+    ];
+
+    const result = preserveCurrentSessionCompletions(previousTasks, refreshedTasks);
+
+    expect(result[0]?.status).toBe('active');
+  });
 });

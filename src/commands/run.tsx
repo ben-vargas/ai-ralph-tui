@@ -94,6 +94,36 @@ type ParallelFailureCarrier = {
   failureMessage: string | null;
 };
 
+type ParallelTrackerRefreshCarrier = {
+  refreshedTasks: TrackerTask[] | undefined;
+};
+
+type ParallelRestartStateCarrier = ParallelFailureCarrier & ParallelTrackerRefreshCarrier & {
+  workers: WorkerDisplayState[];
+  workerOutputs: Map<string, string[]>;
+  mergeQueue: MergeOperation[];
+  currentGroup: number;
+  totalGroups: number;
+  conflicts: FileConflict[];
+  conflictResolutions: ConflictResolutionResult[];
+  conflictTaskId: string;
+  conflictTaskTitle: string;
+  aiResolving: boolean;
+  currentlyResolvingFile: string;
+  showConflicts: boolean;
+  taskIdToWorkerId: Map<string, string>;
+  completedLocallyTaskIds: Set<string>;
+  autoCommitSkippedTaskIds: Set<string>;
+  mergedTaskIds: Set<string>;
+  sessionBranch: string | null;
+  originalBranch: string | null;
+  completionSummaryLines: string[] | undefined;
+  completionSummaryPath: string | undefined;
+  completionSummaryWriteError: string | undefined;
+};
+
+const TRACKER_REFRESH_STATUSES = ['open', 'in_progress', 'completed'] as const;
+
 export function applyParallelFailureState(
   currentState: PersistedSessionState,
   parallelState: ParallelFailureCarrier,
@@ -237,6 +267,64 @@ export function propagateSettingsToEngine(
   if (newConfig.autoCommit !== undefined) {
     engine.setAutoCommit(newConfig.autoCommit);
   }
+}
+
+export async function refreshParallelTrackerTasks(
+  tracker: Pick<TrackerPlugin, 'getTasks'> | null | undefined,
+  parallelState: ParallelTrackerRefreshCarrier,
+  triggerRerender: (() => void) | null,
+): Promise<void> {
+  if (!tracker) return;
+
+  try {
+    const freshTasks = await tracker.getTasks({ status: [...TRACKER_REFRESH_STATUSES] });
+    parallelState.refreshedTasks = freshTasks;
+    triggerRerender?.();
+  } catch {
+    // Tracker refresh is best-effort; don't crash the TUI
+  }
+}
+
+export async function refreshParallelTrackerTasksImmediately(
+  tracker: Pick<TrackerPlugin, 'getTasks'> | null | undefined,
+  parallelState: ParallelTrackerRefreshCarrier,
+  triggerRerender: (() => void) | null,
+  refreshTimer: ReturnType<typeof setTimeout> | null,
+): Promise<ReturnType<typeof setTimeout> | null> {
+  if (!tracker) return refreshTimer;
+
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+  }
+
+  await refreshParallelTrackerTasks(tracker, parallelState, triggerRerender);
+  return null;
+}
+
+export function resetParallelStateForRestart(parallelState: ParallelRestartStateCarrier): void {
+  parallelState.failureMessage = null;
+  parallelState.workers = [];
+  parallelState.workerOutputs = new Map();
+  parallelState.mergeQueue = [];
+  parallelState.currentGroup = 0;
+  parallelState.totalGroups = 0;
+  parallelState.conflicts = [];
+  parallelState.conflictResolutions = [];
+  parallelState.conflictTaskId = '';
+  parallelState.conflictTaskTitle = '';
+  parallelState.aiResolving = false;
+  parallelState.currentlyResolvingFile = '';
+  parallelState.showConflicts = false;
+  parallelState.taskIdToWorkerId = new Map();
+  parallelState.completedLocallyTaskIds = new Set();
+  parallelState.autoCommitSkippedTaskIds = new Set();
+  parallelState.mergedTaskIds = new Set();
+  parallelState.sessionBranch = null;
+  parallelState.originalBranch = null;
+  parallelState.refreshedTasks = undefined;
+  parallelState.completionSummaryLines = undefined;
+  parallelState.completionSummaryPath = undefined;
+  parallelState.completionSummaryWriteError = undefined;
 }
 
 /**
@@ -2201,39 +2289,12 @@ async function runParallelWithTui(
     if (!tracker) return;
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = setTimeout(async () => {
-      try {
-        const freshTasks = await tracker.getTasks({ status: ['open', 'in_progress', 'completed'] });
-        parallelState.refreshedTasks = freshTasks;
-        triggerRerender?.();
-      } catch {
-        // Tracker refresh is best-effort; don't crash the TUI
-      }
+      await refreshParallelTrackerTasks(tracker, parallelState, triggerRerender);
     }, 2000);
   };
 
-  const resetParallelStateForRestart = (): void => {
-    parallelState.failureMessage = null;
-    parallelState.workers = [];
-    parallelState.workerOutputs = new Map();
-    parallelState.mergeQueue = [];
-    parallelState.currentGroup = 0;
-    parallelState.totalGroups = 0;
-    parallelState.conflicts = [];
-    parallelState.conflictResolutions = [];
-    parallelState.conflictTaskId = '';
-    parallelState.conflictTaskTitle = '';
-    parallelState.aiResolving = false;
-    parallelState.currentlyResolvingFile = '';
-    parallelState.showConflicts = false;
-    parallelState.taskIdToWorkerId = new Map();
-    parallelState.completedLocallyTaskIds = new Set();
-    parallelState.autoCommitSkippedTaskIds = new Set();
-    parallelState.mergedTaskIds = new Set();
-    parallelState.sessionBranch = null;
-    parallelState.originalBranch = null;
-    parallelState.completionSummaryLines = undefined;
-    parallelState.completionSummaryPath = undefined;
-    parallelState.completionSummaryWriteError = undefined;
+  const resetParallelRunStateForRestart = (): void => {
+    resetParallelStateForRestart(parallelState);
     completionMetrics = null;
     finalSummary = null;
     finalSummaryPath = null;
@@ -2688,7 +2749,7 @@ async function runParallelWithTui(
             return;
           }
           // Reset executor state and re-run
-          resetParallelStateForRestart();
+          resetParallelRunStateForRestart();
           currentState = {
             ...currentState,
             status: 'running',
@@ -2722,7 +2783,14 @@ async function runParallelWithTui(
           triggerRerender?.();
         }}
         parallelRefreshedTasks={parallelState.refreshedTasks}
-        onRefreshTasks={() => scheduleTrackerRefresh()}
+        onRefreshTasks={async () => {
+          refreshTimer = await refreshParallelTrackerTasksImmediately(
+            tracker,
+            parallelState,
+            triggerRerender,
+            refreshTimer
+          );
+        }}
       />
     );
   }
