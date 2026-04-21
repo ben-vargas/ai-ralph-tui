@@ -14,7 +14,20 @@ import {
   isParallelExecutionComplete,
   applyConflictResolvedTaskTracking,
   propagateSettingsToEngine,
+  refreshParallelTrackerTasks,
+  refreshParallelTrackerTasksImmediately,
+  resetParallelStateForRestart,
 } from '../../src/commands/run.jsx';
+import type { TrackerTask } from '../../src/plugins/trackers/types.js';
+
+function createTrackerTask(id: string, status: TrackerTask['status']): TrackerTask {
+  return {
+    id,
+    title: id,
+    status,
+    priority: 2,
+  };
+}
 
 describe('run command', () => {
   describe('parseRunArgs', () => {
@@ -756,6 +769,161 @@ describe('run command', () => {
     test('does nothing when engine is undefined', () => {
       // Should not throw
       propagateSettingsToEngine(undefined, { autoCommit: true });
+    });
+  });
+
+  describe('refreshParallelTrackerTasks', () => {
+    test('does nothing when there is no tracker', async () => {
+      const parallelState = { refreshedTasks: undefined as TrackerTask[] | undefined };
+      const triggerRerender = mock(() => {});
+
+      await refreshParallelTrackerTasks(null, parallelState, triggerRerender);
+
+      expect(parallelState.refreshedTasks).toBeUndefined();
+      expect(triggerRerender).not.toHaveBeenCalled();
+    });
+
+    test('updates refreshed tasks and triggers rerender with the refresh filter', async () => {
+      const refreshedTasks = [createTrackerTask('task-1', 'open')];
+      const tracker = {
+        getTasks: mock(async (filter?: unknown) => {
+          expect(filter).toEqual({ status: ['open', 'in_progress', 'completed'] });
+          return refreshedTasks;
+        }),
+      };
+      const parallelState = { refreshedTasks: undefined as TrackerTask[] | undefined };
+      const triggerRerender = mock(() => {});
+
+      await refreshParallelTrackerTasks(tracker, parallelState, triggerRerender);
+
+      expect(parallelState.refreshedTasks).toEqual(refreshedTasks);
+      expect(triggerRerender).toHaveBeenCalledTimes(1);
+    });
+
+    test('swallows tracker refresh errors', async () => {
+      const existingTasks = [createTrackerTask('task-1', 'in_progress')];
+      const tracker = {
+        getTasks: mock(async () => {
+          throw new Error('refresh failed');
+        }),
+      };
+      const parallelState = { refreshedTasks: existingTasks };
+      const triggerRerender = mock(() => {});
+
+      await expect(
+        refreshParallelTrackerTasks(tracker, parallelState, triggerRerender)
+      ).resolves.toBeUndefined();
+
+      expect(parallelState.refreshedTasks).toEqual(existingTasks);
+      expect(triggerRerender).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refreshParallelTrackerTasksImmediately', () => {
+    test('clears a pending timer and refreshes immediately', async () => {
+      const refreshedTasks = [createTrackerTask('task-1', 'completed')];
+      const tracker = {
+        getTasks: mock(async () => refreshedTasks),
+      };
+      const parallelState = { refreshedTasks: undefined as TrackerTask[] | undefined };
+      const triggerRerender = mock(() => {});
+      const refreshTimer = setTimeout(() => {}, 1000);
+      const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout');
+
+      try {
+        const nextTimer = await refreshParallelTrackerTasksImmediately(
+          tracker,
+          parallelState,
+          triggerRerender,
+          refreshTimer
+        );
+
+        expect(nextTimer).toBeNull();
+        expect(clearTimeoutSpy).toHaveBeenCalledWith(refreshTimer);
+        expect(parallelState.refreshedTasks).toEqual(refreshedTasks);
+        expect(triggerRerender).toHaveBeenCalledTimes(1);
+      } finally {
+        clearTimeout(refreshTimer);
+        clearTimeoutSpy.mockRestore();
+      }
+    });
+
+    test('does nothing when there is no tracker', async () => {
+      const parallelState = { refreshedTasks: undefined as TrackerTask[] | undefined };
+      const refreshTimer = setTimeout(() => {}, 1000);
+      const clearTimeoutSpy = spyOn(globalThis, 'clearTimeout');
+
+      try {
+        const nextTimer = await refreshParallelTrackerTasksImmediately(
+          null,
+          parallelState,
+          null,
+          refreshTimer
+        );
+
+        expect(nextTimer).toBe(refreshTimer);
+        expect(parallelState.refreshedTasks).toBeUndefined();
+        expect(clearTimeoutSpy).not.toHaveBeenCalled();
+      } finally {
+        clearTimeout(refreshTimer);
+        clearTimeoutSpy.mockRestore();
+      }
+    });
+  });
+
+  describe('resetParallelStateForRestart', () => {
+    test('clears refreshed tasks and other parallel restart state', () => {
+      const parallelState = {
+        failureMessage: 'boom',
+        workers: [{ id: 'worker-1' }],
+        workerOutputs: new Map([['worker-1', ['line']]]),
+        mergeQueue: [{ taskId: 'task-1' }],
+        currentGroup: 3,
+        totalGroups: 5,
+        conflicts: [{ path: 'conflict.ts' }],
+        conflictResolutions: [{ filePath: 'conflict.ts', success: true }],
+        conflictTaskId: 'task-1',
+        conflictTaskTitle: 'Task 1',
+        aiResolving: true,
+        currentlyResolvingFile: 'conflict.ts',
+        showConflicts: true,
+        taskIdToWorkerId: new Map([['task-1', 'worker-1']]),
+        completedLocallyTaskIds: new Set(['task-1']),
+        autoCommitSkippedTaskIds: new Set(['task-2']),
+        mergedTaskIds: new Set(['task-3']),
+        sessionBranch: 'ralph-session/test',
+        originalBranch: 'main',
+        refreshedTasks: [createTrackerTask('task-4', 'open')],
+        completionSummaryLines: ['summary'],
+        completionSummaryPath: '/tmp/summary.md',
+        completionSummaryWriteError: 'warn',
+      } as any;
+
+      resetParallelStateForRestart(parallelState);
+
+      expect(parallelState.failureMessage).toBeNull();
+      expect(parallelState.workers).toEqual([]);
+      expect(parallelState.workerOutputs).toEqual(new Map());
+      expect(parallelState.mergeQueue).toEqual([]);
+      expect(parallelState.currentGroup).toBe(0);
+      expect(parallelState.totalGroups).toBe(0);
+      expect(parallelState.conflicts).toEqual([]);
+      expect(parallelState.conflictResolutions).toEqual([]);
+      expect(parallelState.conflictTaskId).toBe('');
+      expect(parallelState.conflictTaskTitle).toBe('');
+      expect(parallelState.aiResolving).toBe(false);
+      expect(parallelState.currentlyResolvingFile).toBe('');
+      expect(parallelState.showConflicts).toBe(false);
+      expect(parallelState.taskIdToWorkerId).toEqual(new Map());
+      expect(parallelState.completedLocallyTaskIds).toEqual(new Set());
+      expect(parallelState.autoCommitSkippedTaskIds).toEqual(new Set());
+      expect(parallelState.mergedTaskIds).toEqual(new Set());
+      expect(parallelState.sessionBranch).toBeNull();
+      expect(parallelState.originalBranch).toBeNull();
+      expect(parallelState.refreshedTasks).toBeUndefined();
+      expect(parallelState.completionSummaryLines).toBeUndefined();
+      expect(parallelState.completionSummaryPath).toBeUndefined();
+      expect(parallelState.completionSummaryWriteError).toBeUndefined();
     });
   });
 });
