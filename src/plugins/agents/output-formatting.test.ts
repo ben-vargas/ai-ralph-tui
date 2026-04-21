@@ -439,9 +439,9 @@ describe('formatToolCallSegments fallback', () => {
     const segments = formatToolCallSegments('read', { file_path: '/src/index.ts' });
     const text = segmentsToPlainText(segments);
     expect(text).toContain('/src/index.ts');
-    // file_path is a known field, should use normal formatting (purple color) not fallback (muted)
-    const muted = segments.filter(s => s.color === 'muted');
-    expect(muted.length).toBe(0);
+    const pathSegments = segments.filter((s) => s.text.includes('/src/index.ts'));
+    expect(pathSegments).toHaveLength(1);
+    expect(pathSegments[0]?.color).toBe('purple');
   });
 
   test('does not show arbitrary unknown string fields', () => {
