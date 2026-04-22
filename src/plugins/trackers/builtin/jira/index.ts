@@ -70,6 +70,34 @@ function isValidStatus(status: string): boolean {
   return ['open', 'in_progress', 'blocked', 'completed', 'cancelled'].includes(status);
 }
 
+/**
+ * Normalize Jira status names for case-insensitive matching.
+ */
+function normalizeStatusName(statusName: string): string {
+  return statusName.trim().toLowerCase();
+}
+
+/**
+ * Build a list of conventional Jira status names for a target tracker status.
+ * Used as a best-effort fallback when no explicit status mapping is configured.
+ */
+function getConventionalStatusNames(status: TrackerTaskStatus): string[] {
+  switch (status) {
+    case 'open':
+      return ['to do', 'todo', 'open', 'backlog'];
+    case 'in_progress':
+      return ['in progress', 'in-progress'];
+    case 'completed':
+      return ['done', 'completed'];
+    case 'cancelled':
+      return ["won't do", 'wont do', 'cancelled', 'canceled'];
+    case 'blocked':
+      return ['blocked'];
+    default:
+      return [];
+  }
+}
+
 // ─── Priority mapping ─────────────────────────────────────────────────────
 
 /**
@@ -313,7 +341,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
   private readonly TASKS_CACHE_TTL_MS = 30_000;
 
   /** Transitions cache per issue key */
-  private transitionsCache: Map<string, { data: { id: string; name: string; categoryKey: string }[]; time: number }> = new Map();
+  private transitionsCache: Map<string, { data: { id: string; name: string; toName: string; categoryKey: string }[]; time: number }> = new Map();
   private readonly TRANSITIONS_CACHE_TTL_MS = 300_000;
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
@@ -442,16 +470,8 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
     status: TrackerTaskStatus,
   ): Promise<TrackerTask | undefined> {
     try {
-      const targetCategoryKey = statusToJiraCategoryKey(status);
       const transitions = await this.getCachedTransitions(id);
-
-      // Prefer exact status name match, fall back to category match
-      const statusNameLower = status.replaceAll('_', ' ').toLowerCase();
-      let target = transitions.find((t) => t.name.toLowerCase() === statusNameLower);
-
-      if (!target) {
-        target = transitions.find((t) => t.categoryKey === targetCategoryKey);
-      }
+      const target = this.findTransitionForStatus(transitions, status);
 
       if (!target) {
         console.error(
@@ -480,9 +500,8 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
     reason?: string,
   ): Promise<TaskCompletionResult> {
     try {
-      // Find "Done" transition
       const transitions = await this.getCachedTransitions(id);
-      const doneTransition = transitions.find((t) => t.categoryKey === 'done');
+      const doneTransition = this.findTransitionForStatus(transitions, 'completed');
 
       if (!doneTransition) {
         return {
@@ -720,7 +739,7 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
    */
   private async getCachedTransitions(
     issueKey: string,
-  ): Promise<{ id: string; name: string; categoryKey: string }[]> {
+  ): Promise<{ id: string; name: string; toName: string; categoryKey: string }[]> {
     const now = Date.now();
     const cached = this.transitionsCache.get(issueKey);
 
@@ -732,29 +751,51 @@ export class JiraTrackerPlugin extends BaseTrackerPlugin {
     const mapped = transitions.map((t) => ({
       id: t.id,
       name: t.name,
+      toName: t.to.name,
       categoryKey: t.to.statusCategory.key,
     }));
 
     this.transitionsCache.set(issueKey, { data: mapped, time: now });
     return mapped;
   }
-}
 
-/**
- * Map TrackerTaskStatus to the Jira status category key to search for.
- */
-function statusToJiraCategoryKey(status: TrackerTaskStatus): string {
-  switch (status) {
-    case 'in_progress':
-      return 'indeterminate';
-    case 'completed':
-      return 'done';
-    case 'cancelled':
-      return 'done';
-    case 'open':
-    case 'blocked':
-    default:
-      return 'new';
+  /**
+   * Select the best Jira transition for a requested tracker status.
+   * Prefers explicit status mappings, then conventional Jira status names,
+   * and finally falls back to status category matching.
+   */
+  private findTransitionForStatus(
+    transitions: { id: string; name: string; toName: string; categoryKey: string }[],
+    status: TrackerTaskStatus,
+  ): { id: string; name: string; toName: string; categoryKey: string } | undefined {
+    const mappedStatusNames = Object.entries(this.options.statusMapping ?? {})
+      .filter(([, mappedStatus]) => mappedStatus === status)
+      .map(([jiraStatusName]) => normalizeStatusName(jiraStatusName));
+
+    if (mappedStatusNames.length > 0) {
+      const mappedTransition = transitions.find((transition) =>
+        mappedStatusNames.includes(normalizeStatusName(transition.toName)),
+      );
+      if (mappedTransition) {
+        return mappedTransition;
+      }
+    }
+
+    const conventionalStatusNames = getConventionalStatusNames(status);
+    const conventionalTransition = transitions.find((transition) =>
+      conventionalStatusNames.includes(normalizeStatusName(transition.toName)),
+    );
+    if (conventionalTransition) {
+      return conventionalTransition;
+    }
+
+    return transitions.find((transition) =>
+      resolveStatus(
+        transition.toName,
+        transition.categoryKey,
+        this.options.statusMapping,
+      ) === status,
+    );
   }
 }
 

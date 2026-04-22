@@ -541,6 +541,197 @@ describe('Task field mapping', () => {
   });
 });
 
+describe('Jira transition selection', () => {
+  let plugin: JiraTrackerPlugin;
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+    plugin = new JiraTrackerPlugin();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('uses custom status mapping target names when updating status', async () => {
+    let currentStatusName = 'To Do';
+    let currentStatusCategory = 'new';
+    const transitionRequests: Array<{ transition: { id: string } }> = [];
+
+    globalThis.fetch = mock((url: string, init?: RequestInit) => {
+      const urlStr = String(url);
+      const method = init?.method ?? 'GET';
+
+      if (urlStr.includes('/transitions') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            transitions: [
+              {
+                id: '31',
+                name: 'Close issue',
+                to: { name: "Won't Do", statusCategory: { key: 'done', name: 'Done' } },
+              },
+              {
+                id: '41',
+                name: 'Complete issue',
+                to: { name: 'Done', statusCategory: { key: 'done', name: 'Done' } },
+              },
+            ],
+          }),
+        } as Response);
+      }
+
+      if (urlStr.includes('/transitions') && method === 'POST') {
+        const body = JSON.parse(String(init?.body)) as { transition: { id: string } };
+        transitionRequests.push(body);
+
+        if (body.transition.id === '31') {
+          currentStatusName = "Won't Do";
+          currentStatusCategory = 'done';
+        }
+
+        return Promise.resolve({
+          ok: true,
+          status: 204,
+        } as Response);
+      }
+
+      if (urlStr.includes('/rest/api/3/issue/SNSP-55')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(mockIssue({
+            key: 'SNSP-55',
+            statusName: currentStatusName,
+            statusCategory: currentStatusCategory,
+          })),
+        } as Response);
+      }
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      } as Response);
+    }) as unknown as typeof fetch;
+
+    await plugin.initialize({
+      baseUrl: 'https://test.atlassian.net',
+      email: 'test@test.com',
+      apiToken: 'token',
+      epicId: 'EPIC-1',
+      statusMapping: {
+        'Done': 'completed',
+        "Won't Do": 'cancelled',
+      },
+    });
+
+    const task = await plugin.updateTaskStatus('SNSP-55', 'cancelled');
+
+    expect(transitionRequests).toHaveLength(1);
+    expect(transitionRequests[0]?.transition.id).toBe('31');
+    expect(task?.status).toBe('cancelled');
+  });
+
+  it('uses mapped completed status when completing a task', async () => {
+    let currentStatusName = 'In Progress';
+    let currentStatusCategory = 'indeterminate';
+    const transitionRequests: Array<{ transition: { id: string } }> = [];
+    const comments: string[] = [];
+
+    globalThis.fetch = mock((url: string, init?: RequestInit) => {
+      const urlStr = String(url);
+      const method = init?.method ?? 'GET';
+
+      if (urlStr.includes('/transitions') && method === 'GET') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({
+            transitions: [
+              {
+                id: '31',
+                name: 'Close issue',
+                to: { name: "Won't Do", statusCategory: { key: 'done', name: 'Done' } },
+              },
+              {
+                id: '41',
+                name: 'Ship it',
+                to: { name: 'Done', statusCategory: { key: 'done', name: 'Done' } },
+              },
+            ],
+          }),
+        } as Response);
+      }
+
+      if (urlStr.includes('/transitions') && method === 'POST') {
+        const body = JSON.parse(String(init?.body)) as { transition: { id: string } };
+        transitionRequests.push(body);
+
+        if (body.transition.id === '41') {
+          currentStatusName = 'Done';
+          currentStatusCategory = 'done';
+        }
+
+        return Promise.resolve({
+          ok: true,
+          status: 204,
+        } as Response);
+      }
+
+      if (urlStr.includes('/comment') && method === 'POST') {
+        comments.push(String(init?.body));
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.resolve({}),
+        } as Response);
+      }
+
+      if (urlStr.includes('/rest/api/3/issue/SNSP-55')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(mockIssue({
+            key: 'SNSP-55',
+            summary: 'Ship release',
+            statusName: currentStatusName,
+            statusCategory: currentStatusCategory,
+          })),
+        } as Response);
+      }
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({}),
+      } as Response);
+    }) as unknown as typeof fetch;
+
+    await plugin.initialize({
+      baseUrl: 'https://test.atlassian.net',
+      email: 'test@test.com',
+      apiToken: 'token',
+      epicId: 'EPIC-1',
+      statusMapping: {
+        'Done': 'completed',
+        "Won't Do": 'cancelled',
+      },
+    });
+
+    const result = await plugin.completeTask('SNSP-55');
+
+    expect(result.success).toBe(true);
+    expect(transitionRequests).toHaveLength(1);
+    expect(transitionRequests[0]?.transition.id).toBe('41');
+    expect(result.task?.status).toBe('completed');
+    expect(comments).toHaveLength(1);
+  });
+});
+
 describe('getNextTask ordering', () => {
   let plugin: JiraTrackerPlugin;
   let originalFetch: typeof globalThis.fetch;

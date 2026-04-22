@@ -162,7 +162,14 @@ export interface TemplateRenderResult {
  * Supported built-in template types.
  * Each tracker type has a corresponding default template.
  */
-export type BuiltinTemplateType = 'default' | 'beads' | 'beads-rust' | 'json' | 'beads-bv' | 'beads-rust-bv';
+export type BuiltinTemplateType =
+  | 'default'
+  | 'beads'
+  | 'beads-rust'
+  | 'json'
+  | 'beads-bv'
+  | 'beads-rust-bv'
+  | 'jira';
 
 /**
  * Template configuration in ralph config.

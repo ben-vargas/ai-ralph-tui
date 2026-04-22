@@ -579,18 +579,9 @@ interface LinearConversionResult {
 }
 
 /**
- * Resolve labels from CLI args or config fallback.
- * Returns an array of label name strings.
+ * Parse configured labels from either a comma-separated string or string array.
  */
-async function resolveLinearLabels(cliLabels?: string[]): Promise<string[]> {
-  if (cliLabels && cliLabels.length > 0) {
-    return cliLabels;
-  }
-
-  // Fall back to config labels
-  const storedConfig = await loadStoredConfig();
-  const configLabels = storedConfig.trackerOptions?.labels;
-
+export function parseConfiguredLabels(configLabels: unknown): string[] {
   if (typeof configLabels === 'string') {
     return configLabels.split(',').map((l) => l.trim()).filter(Boolean);
   }
@@ -603,6 +594,20 @@ async function resolveLinearLabels(cliLabels?: string[]): Promise<string[]> {
   }
 
   return [];
+}
+
+/**
+ * Resolve labels from CLI args or config fallback.
+ * Returns an array of label name strings.
+ */
+async function resolveLinearLabels(cliLabels?: string[]): Promise<string[]> {
+  if (cliLabels && cliLabels.length > 0) {
+    return cliLabels;
+  }
+
+  // Fall back to config labels
+  const storedConfig = await loadStoredConfig();
+  return parseConfiguredLabels(storedConfig.trackerOptions?.labels);
 }
 
 /**
@@ -1009,15 +1014,7 @@ async function executeBeadsConversion(
   if (labels.length === 0) {
     // Load labels from config if not provided via CLI
     const storedConfig = await loadStoredConfig();
-    const configLabels = storedConfig.trackerOptions?.labels;
-    if (typeof configLabels === 'string') {
-      labels = configLabels.split(',').map((l) => l.trim()).filter(Boolean);
-    } else if (Array.isArray(configLabels)) {
-      labels = configLabels
-        .filter((l): l is string => typeof l === 'string')
-        .map((l) => l.trim())
-        .filter(Boolean);
-    }
+    labels = parseConfiguredLabels(storedConfig.trackerOptions?.labels);
   }
 
   // Perform the conversion
@@ -1165,10 +1162,7 @@ export async function executeJiraConversion(
   let labels = args.labels ?? [];
   if (labels.length === 0) {
     const storedConfig = await loadStoredConfig();
-    const configLabels = storedConfig.trackerOptions?.labels;
-    if (typeof configLabels === 'string') {
-      labels = configLabels.split(',').map((l: string) => l.trim()).filter(Boolean);
-    }
+    labels = parseConfiguredLabels(storedConfig.trackerOptions?.labels);
   }
 
   // Get issue types for the project to find Epic and Story type IDs

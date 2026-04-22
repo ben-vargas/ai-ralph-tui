@@ -93,7 +93,7 @@ Override the default mapping for custom workflow statuses:
 "Won't Do" = "cancelled"
 ```
 
-When a custom mapping is configured, exact status name matches take precedence over category-based mapping.
+When a custom mapping is configured, exact status name matches take precedence over category-based mapping for both task reads and workflow transitions.
 
 ## Priority Mapping
 
