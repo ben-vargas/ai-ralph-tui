@@ -424,6 +424,7 @@ export function buildTemplateContext(
     vars: buildTemplateVariables(task, config, epic, extended),
     task,
     config,
+    prd: typeof extended === 'string' ? undefined : extended?.prd,
     epic,
   };
 }
@@ -491,6 +492,7 @@ export function renderPrompt(
     ...context.vars,
     task: context.task,
     config: context.config,
+    prd: context.prd,
     epic: context.epic,
   };
 

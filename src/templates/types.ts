@@ -116,6 +116,15 @@ export interface TemplateContext {
   /** The raw configuration for advanced template use */
   config: Partial<RalphConfig>;
 
+  /** PRD context for templates that rely on nested project data */
+  prd?: {
+    name: string;
+    description?: string;
+    content: string;
+    completedCount: number;
+    totalCount: number;
+  };
+
   /** Epic information if available */
   epic?: {
     id: string;
