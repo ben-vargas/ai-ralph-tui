@@ -278,6 +278,22 @@ describe('formatToolCall', () => {
     expect(result).toContain('/src/index.ts');
   });
 
+  test('fallback uses only the first line of safe values', () => {
+    const result = formatToolCall('read', { filename: '/src/index.ts\nignored-line' } as unknown as Parameters<typeof formatToolCall>[1]);
+    expect(result).toContain('/src/index.ts');
+    expect(result).not.toContain('ignored-line');
+  });
+
+  test('fallback skips over-cap candidates instead of truncating them', () => {
+    const tooLongPath = '/' + 'x'.repeat(121);
+    const result = formatToolCall('apply_patch', {
+      filename: tooLongPath,
+      patch: '--- a/file.ts\n+++ b/file.ts',
+    } as unknown as Parameters<typeof formatToolCall>[1]);
+    expect(result).toContain('--- a/file.ts');
+    expect(result).not.toContain(tooLongPath);
+  });
+
   test('fallback skips very long values', () => {
     const longContent = 'x'.repeat(300);
     const result = formatToolCall('write', { body: longContent } as unknown as Parameters<typeof formatToolCall>[1]);
@@ -424,6 +440,24 @@ describe('formatToolCallSegments fallback', () => {
     const text = segmentsToPlainText(segments);
     expect(text).toContain('[read]');
     expect(text).toContain('/src/index.ts');
+  });
+
+  test('segment fallback uses only the first line of safe values', () => {
+    const segments = formatToolCallSegments('read', { filename: '/src/index.ts\nignored-line' } as Record<string, unknown>);
+    const text = segmentsToPlainText(segments);
+    expect(text).toContain('/src/index.ts');
+    expect(text).not.toContain('ignored-line');
+  });
+
+  test('segment fallback skips over-cap candidates instead of truncating them', () => {
+    const tooLongPath = '/' + 'x'.repeat(121);
+    const segments = formatToolCallSegments('apply_patch', {
+      filename: tooLongPath,
+      patch: '--- a/file.ts\n+++ b/file.ts',
+    } as Record<string, unknown>);
+    const text = segmentsToPlainText(segments);
+    expect(text).toContain('--- a/file.ts');
+    expect(text).not.toContain(tooLongPath);
   });
 
   test('segment fallback normalizes patch content to one line', () => {

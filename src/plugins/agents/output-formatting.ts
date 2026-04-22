@@ -142,6 +142,7 @@ export interface ToolInputFormatters {
 }
 
 const FALLBACK_DISPLAY_KEYS = ['filename', 'fileName', 'filepath', 'filePath', 'patch'] as const;
+const FALLBACK_DISPLAY_MAX_LENGTH = 120;
 
 function looksLikeUnifiedDiff(value: string): boolean {
   return value.split('\n').some(
@@ -166,23 +167,24 @@ function summarizeUnifiedDiff(value: string): string {
   return headerLine ?? lines[0]!;
 }
 
-function normalizeFallbackDisplayValue(key: string, value: string): string {
+function selectFallbackDisplayValue(key: string, value: string): string | undefined {
   const displayValue = key === 'patch' || looksLikeUnifiedDiff(value)
     ? summarizeUnifiedDiff(value)
     : value;
+  const [firstLine = ''] = displayValue.split(/\r?\n/, 1);
+  const normalized = firstLine.trim();
 
-  const normalized = displayValue.replace(/\s+/g, ' ').trim();
-  if (normalized.length <= 120) {
-    return normalized;
+  if (normalized.length === 0 || normalized.length > FALLBACK_DISPLAY_MAX_LENGTH) {
+    return undefined;
   }
 
-  return normalized.slice(0, 120) + '...';
+  return normalized;
 }
 
 /**
  * Extract a fallback display string from tool input when no known fields matched.
  * Only considers known non-standard keys to avoid exposing arbitrary input values.
- * Long values are truncated to 120 chars for display.
+ * Multi-line values are reduced to their first line and overlong candidates are ignored.
  */
 function extractFallbackDisplay(input: Record<string, unknown>): string | undefined {
   // Priority: look for path-like values first, then any other known-safe fallback keys.
@@ -192,11 +194,13 @@ function extractFallbackDisplay(input: Record<string, unknown>): string | undefi
   for (const key of FALLBACK_DISPLAY_KEYS) {
     const value = input[key];
     if (typeof value !== 'string' || value.length === 0) continue;
+    const displayValue = selectFallbackDisplayValue(key, value);
+    if (!displayValue) continue;
 
-    if (value.startsWith('/') || value.startsWith('./') || value.startsWith('~')) {
-      if (!bestPath) bestPath = normalizeFallbackDisplayValue(key, value);
+    if (displayValue.startsWith('/') || displayValue.startsWith('./') || displayValue.startsWith('~')) {
+      if (!bestPath) bestPath = displayValue;
     } else if (!bestValue) {
-      bestValue = normalizeFallbackDisplayValue(key, value);
+      bestValue = displayValue;
     }
   }
 
