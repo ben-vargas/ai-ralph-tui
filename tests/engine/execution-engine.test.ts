@@ -25,6 +25,11 @@ import {
   createDetectResult,
 } from '../mocks/agent-responses.js';
 
+// @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+const actualAgentRegistryModule = await import('../../src/plugins/agents/registry.js?test-reload') as typeof import('../../src/plugins/agents/registry.js');
+// @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+const actualTrackerRegistryModule = await import('../../src/plugins/trackers/registry.js?test-reload') as typeof import('../../src/plugins/trackers/registry.js');
+
 // Mock the registry modules
 const mockAgentInstance = createMockAgentPlugin();
 const mockTrackerInstance: Partial<TrackerPlugin> = {
@@ -45,12 +50,14 @@ const mockUpdateSessionMaxIterations = mock(() => Promise.resolve());
 
 // Override module imports
 mock.module('../../src/plugins/agents/registry.js', () => ({
+  ...actualAgentRegistryModule,
   getAgentRegistry: () => ({
     getInstance: () => Promise.resolve(mockAgentInstance),
   }),
 }));
 
 mock.module('../../src/plugins/trackers/registry.js', () => ({
+  ...actualTrackerRegistryModule,
   getTrackerRegistry: () => ({
     getInstance: () => Promise.resolve(mockTrackerInstance),
   }),

@@ -192,9 +192,11 @@ describe('BeadsRustTrackerPlugin', () => {
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
         {
           exitCode: 0,
-          stdout: JSON.stringify([
-            { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
-          ]),
+          stdout: JSON.stringify({
+            issues: [
+              { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
+            ],
+          }),
         },
       ];
 
@@ -207,6 +209,37 @@ describe('BeadsRustTrackerPlugin', () => {
       expect(mockSpawnArgs.length).toBe(1);
       expect(mockSpawnArgs[0]?.cmd).toBe('br');
       expect(mockSpawnArgs[0]?.args).toEqual(['list', '--json', '--all', '--limit', '0']);
+    });
+
+    test('returns empty array and logs unexpected br list JSON shapes', async () => {
+      const originalError = console.error;
+      const errorMessages: string[] = [];
+      console.error = (...args: unknown[]) => {
+        errorMessages.push(args.map((arg) => String(arg)).join(' '));
+      };
+
+      try {
+        mockSpawnResponses = [
+          { exitCode: 0, stdout: 'br version 0.4.1\n' },
+          {
+            exitCode: 0,
+            stdout: JSON.stringify({ tasks: [] }),
+          },
+        ];
+
+        const plugin = new BeadsRustTrackerPlugin();
+        await plugin.initialize({ workingDir: '/test' });
+        mockSpawnArgs = [];
+
+        const tasks = await plugin.getTasks();
+
+        expect(tasks).toEqual([]);
+        expect(errorMessages).toHaveLength(1);
+        expect(errorMessages[0]).toContain('unwrapBrJson expected BrTaskJson[] or { issues: BrTaskJson[] }');
+        expect(errorMessages[0]).toContain('{"tasks":[]}');
+      } finally {
+        console.error = originalError;
+      }
     });
 
     test('supports --parent filtering via in-memory filtering', async () => {
@@ -677,15 +710,17 @@ describe('BeadsRustTrackerPlugin', () => {
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
         {
           exitCode: 0,
-          stdout: JSON.stringify([
-            {
-              id: 'epic1',
-              title: 'Epic 1',
-              status: 'open',
-              priority: 1,
-              issue_type: 'epic',
-            },
-          ]),
+          stdout: JSON.stringify({
+            issues: [
+              {
+                id: 'epic1',
+                title: 'Epic 1',
+                status: 'open',
+                priority: 1,
+                issue_type: 'epic',
+              },
+            ],
+          }),
         },
       ];
 
@@ -909,10 +944,12 @@ describe('BeadsRustTrackerPlugin', () => {
         // First: br ready with filters
         {
           exitCode: 0,
-          stdout: JSON.stringify([
-            { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
-            { id: 't2', title: 'Other Task', status: 'open', priority: 1 },
-          ]),
+          stdout: JSON.stringify({
+            issues: [
+              { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
+              { id: 't2', title: 'Other Task', status: 'open', priority: 1 },
+            ],
+          }),
         },
         // Second: br dep list epic --direction up --json (for filtering children)
         {

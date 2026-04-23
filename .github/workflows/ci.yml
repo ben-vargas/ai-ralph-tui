@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  BUN_VERSION: 1.3.6
+
 on:
   push:
     branches: [main]
@@ -16,7 +19,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Clear TypeScript build cache
         run: |
@@ -45,7 +48,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Install dependencies
         run: bun install
@@ -121,6 +124,10 @@ jobs:
           # Linear tracker tests: client.test.ts and index.test.ts both use mock.module()
           # (client mocks @linear/sdk, index mocks ./client.js) so they must run in separate processes.
           # body.test.ts is pure functions with no mocks and can batch with convert.test.ts.
+          echo "=== Running jira tracker tests ===" | tee -a coverage-output.txt
+          bun test src/plugins/trackers/builtin/jira/ --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
+          cp coverage/lcov.info coverage-parts/jira.lcov
+
           echo "=== Running linear body.test.ts + convert.test.ts ===" | tee -a coverage-output.txt
           bun test src/plugins/trackers/builtin/linear/body.test.ts src/commands/convert.test.ts --coverage --coverage-reporter=text --coverage-reporter=lcov 2>&1 | tee -a coverage-output.txt
           cp coverage/lcov.info coverage-parts/linear-body.lcov
@@ -186,43 +193,23 @@ jobs:
 
       - name: Check coverage threshold
         run: |
-          # Use bun's text output to check coverage. Bun reports per-file average
-          # line coverage under "All files | % Funcs | % Lines". Each batch prints
-          # this line. We use the tests/ batch (first line, 1400+ tests) as the
-          # primary indicator since it loads the most code paths.
-          #
-          # Note: we intentionally use bun's text output (per-file average) rather
-          # than lcov --summary (raw line totals). Raw totals are misleadingly low
-          # because a few large UI/server files with ~0% coverage contain thousands
-          # of lines that dwarf the well-tested files. Per-file average treats each
-          # source file equally, which better reflects actual test quality.
+          # Keep bun's text output for quick batch-by-batch visibility, but enforce
+          # the threshold using merged LCOV data across all batches. The merged metric
+          # still uses an equal-weight per-file average so very large low-coverage UI
+          # files do not drown out well-tested modules.
 
           echo "Coverage breakdown by batch:"
           echo "  %-Funcs  %-Lines"
           grep "^All files" coverage-output.txt | awk '{printf "  %6s  %6s\n", $4, $6}'
           echo ""
 
-          # Extract line coverage (% Lines, field $6) from the tests/ batch (first "All files" line)
-          LINES_COV=$(awk '/^All files/{print $6; exit}' coverage-output.txt)
-
-          echo "Primary line coverage (tests/ batch): $LINES_COV%"
-
-          # Check if coverage is below 38%
-          # Note: Threshold lowered from 40% to 38% when parallel execution was added.
-          # The tests/ batch doesn't exercise src/parallel/ code (which has its own tests
-          # in src/parallel/*.test.ts with 87-100% coverage). A better approach would be
-          # to use combined coverage from all batches.
-          if [ -z "$LINES_COV" ] || [ "$(echo "$LINES_COV < 38" | bc -l)" -eq 1 ]; then
-            echo "❌ Line coverage $LINES_COV% is below 38% threshold"
-            exit 1
-          fi
-          echo "✅ Line coverage $LINES_COV% meets 38% threshold"
+          bun testing/check-coverage.mjs coverage-parts 38
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           # Upload all batch coverage files - Codecov will merge them correctly
-          files: ./coverage-parts/tests.lcov,./coverage-parts/tests-beads-rust-bv.lcov,./coverage-parts/tests-info.lcov,./coverage-parts/doctor.lcov,./coverage-parts/info.lcov,./coverage-parts/skills.lcov,./coverage-parts/run.lcov,./coverage-parts/config.lcov,./coverage-parts/engine.lcov,./coverage-parts/beads-bv.lcov,./coverage-parts/beads-rust.lcov,./coverage-parts/beads.lcov,./coverage-parts/plugins.lcov,./coverage-parts/linear-body.lcov,./coverage-parts/linear-client.lcov,./coverage-parts/linear-index.lcov,./coverage-parts/session.lcov,./coverage-parts/sandbox.lcov,./coverage-parts/wizard.lcov,./coverage-parts/setup.lcov,./coverage-parts/skill-installer-spawn.lcov,./coverage-parts/migration-install.lcov,./coverage-parts/templates.lcov,./coverage-parts/tui.lcov,./coverage-parts/prd.lcov,./coverage-parts/chat.lcov,./coverage-parts/parallel.lcov
+          files: ./coverage-parts/tests.lcov,./coverage-parts/tests-beads-rust-bv.lcov,./coverage-parts/tests-info.lcov,./coverage-parts/doctor.lcov,./coverage-parts/info.lcov,./coverage-parts/skills.lcov,./coverage-parts/run.lcov,./coverage-parts/config.lcov,./coverage-parts/engine.lcov,./coverage-parts/beads-bv.lcov,./coverage-parts/beads-rust.lcov,./coverage-parts/beads.lcov,./coverage-parts/plugins.lcov,./coverage-parts/jira.lcov,./coverage-parts/linear-body.lcov,./coverage-parts/linear-client.lcov,./coverage-parts/linear-index.lcov,./coverage-parts/session.lcov,./coverage-parts/sandbox.lcov,./coverage-parts/wizard.lcov,./coverage-parts/setup.lcov,./coverage-parts/skill-installer-spawn.lcov,./coverage-parts/migration-install.lcov,./coverage-parts/templates.lcov,./coverage-parts/tui.lcov,./coverage-parts/prd.lcov,./coverage-parts/chat.lcov,./coverage-parts/parallel.lcov
           fail_ci_if_error: false
           verbose: true
         env:
@@ -253,7 +240,7 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Clear TypeScript build cache
         run: |

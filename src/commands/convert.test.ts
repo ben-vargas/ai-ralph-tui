@@ -1,10 +1,10 @@
 /**
- * ABOUTME: Unit tests for convert command argument parsing and Linear conversion logic.
- * Covers Linear-specific argument validation, format support, and parent resolution modes.
+ * ABOUTME: Unit tests for convert command argument parsing and label parsing helpers.
+ * Covers format support, tracker-specific argument validation, and config label parsing.
  */
 
 import { describe, expect, test } from 'bun:test';
-import { parseConvertArgs } from './convert.js';
+import { parseConfiguredLabels, parseConvertArgs } from './convert.js';
 
 describe('parseConvertArgs', () => {
   describe('format support', () => {
@@ -26,9 +26,10 @@ describe('parseConvertArgs', () => {
       expect(result!.to).toBe('linear');
     });
 
-    test('rejects unsupported format', () => {
-      const result = parseConvertArgs(['--to', 'jira', 'input.md']);
-      expect(result).toBeNull();
+    test('accepts --to jira', () => {
+      const result = parseConvertArgs(['--to', 'jira', '--project', 'SNSP', 'input.md']);
+      expect(result).not.toBeNull();
+      expect(result!.to).toBe('jira');
     });
 
     test('accepts -t shorthand for format', () => {
@@ -131,6 +132,30 @@ describe('parseConvertArgs', () => {
     });
   });
 
+  describe('Jira-specific options', () => {
+    test('--project is required for jira format', () => {
+      const result = parseConvertArgs(['--to', 'jira', 'input.md']);
+      expect(result).toBeNull();
+    });
+
+    test('accepts --project flag', () => {
+      const result = parseConvertArgs(['--to', 'jira', '--project', 'SNSP', 'input.md']);
+      expect(result).not.toBeNull();
+      expect(result!.project).toBe('SNSP');
+    });
+
+    test('accepts --parent flag for existing epic', () => {
+      const result = parseConvertArgs([
+        '--to', 'jira',
+        '--project', 'SNSP',
+        '--parent', 'SNSP-54',
+        'input.md',
+      ]);
+      expect(result).not.toBeNull();
+      expect(result!.parent).toBe('SNSP-54');
+    });
+  });
+
   describe('common options', () => {
     test('parses --labels as comma-separated list', () => {
       const result = parseConvertArgs(['--to', 'linear', '--team', 'ENG', '--labels', 'a,b,c', 'input.md']);
@@ -203,5 +228,26 @@ describe('parseConvertArgs', () => {
       expect(result!.project).toBeUndefined();
       expect(result!.parent).toBeUndefined();
     });
+  });
+});
+
+describe('parseConfiguredLabels', () => {
+  test('parses comma-separated labels from string config', () => {
+    expect(parseConfiguredLabels('backend, sprint-1 , ralph')).toEqual([
+      'backend',
+      'sprint-1',
+      'ralph',
+    ]);
+  });
+
+  test('parses labels from array config', () => {
+    expect(parseConfiguredLabels(['backend', ' sprint-1 ', '', 42])).toEqual([
+      'backend',
+      'sprint-1',
+    ]);
+  });
+
+  test('returns empty array for unsupported config values', () => {
+    expect(parseConfiguredLabels({ labels: ['backend'] })).toEqual([]);
   });
 });

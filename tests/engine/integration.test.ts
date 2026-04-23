@@ -220,15 +220,22 @@ describe('ExecutionEngine Integration', () => {
     // Reset mocks for each test
     mockAgentRegistry = createControllableAgent();
     mockTrackerRegistry = createControllableTracker();
-    
+
+    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+    const actualAgentRegistryModule = await import('../../src/plugins/agents/registry.js?test-reload') as typeof import('../../src/plugins/agents/registry.js');
+    // @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+    const actualTrackerRegistryModule = await import('../../src/plugins/trackers/registry.js?test-reload') as typeof import('../../src/plugins/trackers/registry.js');
+
     // Mock the modules
     mock.module('../../src/plugins/agents/registry.js', () => ({
+      ...actualAgentRegistryModule,
       getAgentRegistry: () => ({
         getInstance: () => Promise.resolve(mockAgentRegistry.agent),
       }),
     }));
 
     mock.module('../../src/plugins/trackers/registry.js', () => ({
+      ...actualTrackerRegistryModule,
       getTrackerRegistry: () => ({
         getInstance: () => Promise.resolve(mockTrackerRegistry.tracker),
       }),
