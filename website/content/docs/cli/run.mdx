@@ -277,7 +277,7 @@ Pass `--remote-only` to start the TUI as a **pure remote client**: no local exec
 | Local engine | **Not started.** No local agent process, no session file, no lock acquired. |
 | Local tab | **Hidden.** Only remote tabs appear in the TabBar. |
 | Tab navigation | Number keys (1–9) and `[` / `]` switch between remote tabs as usual. |
-| Empty state | If no remotes are configured the TUI shows "No remotes configured. Press A to add a remote." Press `A` to open the add-remote overlay. |
+| Empty state | At startup, `--remote-only` with zero configured remotes **fails fast** with a non-interactive error (exit 1) — the TUI never opens. See [Fail-fast](#fail-fast-when-no-remotes-are-configured) below. The in-TUI hint `No remotes configured. Press A to add a remote.` only appears if you remove the last remaining remote during an interactive `--remote-only` session; pressing `A` opens the add-remote overlay. |
 | `--epic`, `--prd`, `--agent`, `--model`, `--tracker`, etc. | Silently ignored — each remote uses its own configuration. |
 
 ### Examples
