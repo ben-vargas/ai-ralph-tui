@@ -93,6 +93,14 @@ Models use `provider/model` format. Valid providers:
 Model names within each provider are validated by the provider's API. If you specify an invalid model name, you'll see an error from the underlying agent CLI.
 </Callout>
 
+## Switching Agent or Model During a Run
+
+Press `a` in the local TUI to open the Agent & Model picker. Choose an agent in the left column and a model in the right column. Agents with known model lists show selectable models; agents that accept open-ended model names use a free-text model field.
+
+Use `Tab` to switch columns, `Enter` to apply, and `Esc` to cancel. The selected agent and model are used on the next iteration.
+
+Enable **Save as default** to write the selection to `.ralph-tui/config.toml`. Leave it unchecked for a session-only switch.
+
 ## Examples
 
 ### Basic Usage with JSON Tracker

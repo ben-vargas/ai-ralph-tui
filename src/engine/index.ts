@@ -35,6 +35,7 @@ import { RateLimitDetector, type RateLimitDetectionResult } from './rate-limit-d
 import type { TrackerPlugin, TrackerTask } from '../plugins/trackers/types.js';
 import type {
   AgentPlugin,
+  AgentPluginConfig,
   AgentExecutionHandle,
   AgentExecutionResult,
 } from '../plugins/agents/types.js';
@@ -1863,10 +1864,15 @@ export class ExecutionEngine {
    * Updates state, emits agent:switched event, and persists across iterations.
    *
    * @param newAgentPlugin - Plugin identifier of the agent to switch to
-   * @param reason - Why the switch is happening (primary recovery or fallback)
+   * @param reason - Why the switch is happening
    */
-  private switchAgent(newAgentPlugin: string, reason: ActiveAgentReason): void {
-    const previousAgent = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
+  private switchAgent(
+    newAgentPlugin: string,
+    reason: ActiveAgentReason,
+    previousAgentOverride?: string
+  ): void {
+    const previousAgent =
+      previousAgentOverride ?? this.state.activeAgent?.plugin ?? this.config.agent.plugin;
     const now = new Date().toISOString();
 
     // Update active agent state
@@ -1889,6 +1895,10 @@ export class ExecutionEngine {
         primaryAgent: this.state.rateLimitState.primaryAgent,
         // Clear limitedAt and fallbackAgent on recovery
       };
+    } else if (reason === 'user-selected') {
+      this.state.rateLimitState = {
+        primaryAgent: newAgentPlugin,
+      };
     }
 
     // Record the agent switch for iteration logging
@@ -1898,14 +1908,16 @@ export class ExecutionEngine {
       to: newAgentPlugin,
       reason,
     };
-    this.currentIterationAgentSwitches.push(switchEntry);
+    if (reason !== 'user-selected') {
+      this.currentIterationAgentSwitches.push(switchEntry);
+    }
 
     // Log the switch to console for visibility
     if (reason === 'fallback') {
       console.log(
         `[agent-switch] Switching to fallback: ${previousAgent} → ${newAgentPlugin} (rate limit)`
       );
-    } else {
+    } else if (reason === 'primary') {
       // Calculate duration on fallback for recovery logging
       let durationOnFallback = '';
       if (this.state.rateLimitState?.limitedAt) {
@@ -1922,6 +1934,10 @@ export class ExecutionEngine {
       }
       console.log(
         `[agent-switch] Recovering to primary: ${previousAgent} → ${newAgentPlugin}${durationOnFallback}`
+      );
+    } else {
+      console.log(
+        `[agent-switch] User selected agent: ${previousAgent} → ${newAgentPlugin}`
       );
     }
 
@@ -2084,6 +2100,60 @@ export class ExecutionEngine {
   }
 
   /**
+   * Switch to a user-selected agent for subsequent iterations.
+   * Validates availability and model compatibility before mutating engine state.
+   *
+   * @param agentConfig - Agent configuration to activate
+   * @param model - Optional model override; undefined clears the runtime model override
+   */
+  async switchToUserAgent(
+    agentConfig: AgentPluginConfig,
+    model: string | undefined
+  ): Promise<void> {
+    const normalizedModel = model?.trim() ? model.trim() : undefined;
+
+    const agentRegistry = getAgentRegistry();
+    const newInstance = await agentRegistry.getInstance(agentConfig);
+
+    const detectResult = await newInstance.detect();
+    if (!detectResult.available) {
+      throw new Error(
+        `Agent '${agentConfig.plugin}' not available: ${detectResult.error ?? 'detection failed'}`
+      );
+    }
+
+    if (normalizedModel !== undefined) {
+      const modelError = newInstance.validateModel(normalizedModel);
+      if (modelError) {
+        throw new Error(modelError);
+      }
+    } else {
+      const modelError = newInstance.validateModel('');
+      if (modelError) {
+        throw new Error(modelError);
+      }
+    }
+
+    const previousAgent = this.state.activeAgent?.plugin ?? this.config.agent.plugin;
+
+    this.config.agent = {
+      ...agentConfig,
+      options: { ...agentConfig.options },
+    };
+    this.config.model = normalizedModel;
+    this.rateLimitConfig = {
+      ...DEFAULT_RATE_LIMIT_HANDLING,
+      ...this.config.agent.rateLimitHandling,
+    };
+    this.agent = newInstance;
+    this.primaryAgentInstance = newInstance;
+    this.rateLimitedAgents.clear();
+    this.state.currentModel = normalizedModel;
+
+    this.switchAgent(agentConfig.plugin, 'user-selected', previousAgent);
+  }
+
+  /**
    * Get the next available fallback agent that hasn't been rate-limited.
    * Returns undefined if no fallback agents are configured or all are rate-limited.
    */
@@ -2204,6 +2274,10 @@ export class ExecutionEngine {
         return `${statusWord} on primary after recovering from fallback (${fallbackAgent})`;
       }
       return `${statusWord} on primary (${currentAgent}) after recovery`;
+    }
+
+    if (lastSwitch && lastSwitch.reason === 'user-selected') {
+      return `${statusWord} on user-selected agent (${currentAgent})`;
     }
 
     // Generic summary for other cases

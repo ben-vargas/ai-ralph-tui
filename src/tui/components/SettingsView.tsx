@@ -84,7 +84,19 @@ function buildSettingDefinitions(
         agent: value as string,
         defaultAgent: value as string,
       }),
-      requiresRestart: true,
+      requiresRestart: false,
+    },
+    {
+      key: 'model',
+      label: 'Model',
+      type: 'text',
+      description: 'Model override for the selected agent',
+      getValue: (config) => config.model,
+      setValue: (config, value) => ({
+        ...config,
+        model: value as string,
+      }),
+      requiresRestart: false,
     },
     {
       key: 'maxIterations',

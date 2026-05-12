@@ -445,6 +445,13 @@ export interface AgentPlugin {
   validateModel(model: string): string | null;
 
   /**
+   * List known model names for this agent.
+   * Agents with open-ended model identifiers should return an empty array.
+   * @returns Array of known model identifiers
+   */
+  listModels(): string[];
+
+  /**
    * Run a preflight check to verify the agent is fully operational.
    * This goes beyond detect() by actually running a minimal test prompt
    * to verify the agent can process requests (e.g., has a valid model configured).

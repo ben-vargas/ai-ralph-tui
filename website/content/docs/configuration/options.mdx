@@ -18,6 +18,7 @@ These control basic execution behavior.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `agent` | string | - | Agent plugin to use (e.g., "claude", "opencode") |
+| `model` | string | - | Default model override for the selected agent. The TUI Agent & Model picker saves here when **Save as default** is enabled. |
 | `command` | string | - | Custom command/executable for the agent (e.g., "ccr code") |
 | `tracker` | string | - | Tracker plugin to use (e.g., "beads-bv", "json") |
 | `maxIterations` | number | `10` | Maximum iterations per session (0 = unlimited, max 1000) |
@@ -49,14 +50,16 @@ The simplest way to configure an agent:
 
 ```toml
 agent = "claude"
+model = "sonnet"
 
 [agentOptions]
-model = "claude-sonnet-4-20250514"
+# Plugin-specific options go here.
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `agent` | string | - | Agent plugin name |
+| `model` | string | - | Model passed to the selected agent. If omitted, plugin-specific defaults apply. |
 | `command` | string | - | Custom command/executable path (see below) |
 | `agentOptions` | object | `{}` | Plugin-specific options |
 

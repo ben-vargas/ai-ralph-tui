@@ -208,6 +208,7 @@ function mergeConfigs(
     merged.iterationDelay = project.iterationDelay;
   if (project.outputDir !== undefined) merged.outputDir = project.outputDir;
   if (project.agent !== undefined) merged.agent = project.agent;
+  if (project.model !== undefined) merged.model = project.model;
   if (project.agentCommand !== undefined)
     merged.agentCommand = project.agentCommand;
   if (project.command !== undefined) merged.command = project.command;
@@ -696,7 +697,7 @@ export async function buildConfig(
       DEFAULT_CONFIG.progressFile,
     epicId: options.epicId,
     prdPath: options.prdPath,
-    model: options.model,
+    model: options.model ?? storedConfig.model,
     showTui: !options.headless,
     errorHandling,
     sandbox,

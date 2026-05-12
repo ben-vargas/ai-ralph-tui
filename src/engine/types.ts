@@ -12,8 +12,9 @@ import type { TokenUsageSummary } from '../plugins/agents/usage.js';
  * Reason why an agent is currently active.
  * - 'primary': The configured primary agent
  * - 'fallback': A fallback agent due to rate limiting of primary
+ * - 'user-selected': A user-selected agent for subsequent iterations
  */
-export type ActiveAgentReason = 'primary' | 'fallback';
+export type ActiveAgentReason = 'primary' | 'fallback' | 'user-selected';
 
 /**
  * Tracks which agent is currently active and why.

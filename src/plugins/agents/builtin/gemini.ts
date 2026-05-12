@@ -21,6 +21,8 @@ import type {
 // Re-export for backward compatibility with tests
 export { extractErrorMessage } from '../utils.js';
 
+const GEMINI_MODELS = ['gemini-2.5-pro', 'gemini-2.5-flash'] as const;
+
 /**
  * Parse Gemini JSON line into standardized display events.
  * Returns AgentDisplayEvent[] - the shared processAgentEvents decides what to show.
@@ -238,8 +240,8 @@ export class GeminiAgentPlugin extends BaseAgentPlugin {
         type: 'select',
         choices: [
           { value: '', label: 'Default', description: 'Use configured default model' },
-          { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Most capable' },
-          { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Fast and efficient' },
+          { value: GEMINI_MODELS[0], label: 'Gemini 2.5 Pro', description: 'Most capable' },
+          { value: GEMINI_MODELS[1], label: 'Gemini 2.5 Flash', description: 'Fast and efficient' },
         ],
         default: '',
         required: false,
@@ -432,6 +434,10 @@ export class GeminiAgentPlugin extends BaseAgentPlugin {
       return `Invalid model "${model}". Gemini models start with "gemini-"`;
     }
     return null;
+  }
+
+  override listModels(): string[] {
+    return [...GEMINI_MODELS];
   }
 }
 
