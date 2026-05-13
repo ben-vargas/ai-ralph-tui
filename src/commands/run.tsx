@@ -8,7 +8,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createCliRenderer } from '@opentui/core';
 import { createRoot } from '@opentui/react';
-import { buildConfig, validateConfig, loadStoredConfig, saveProjectConfig } from '../config/index.js';
+import { buildConfig, validateConfig, loadStoredConfig, saveProjectConfig, getDefaultAgentConfig } from '../config/index.js';
 import type { RuntimeOptions, StoredConfig, SandboxConfig } from '../config/types.js';
 import {
   checkSession,
@@ -258,13 +258,47 @@ export function applyConflictResolvedTaskTracking(
 
 /**
  * Propagate runtime-updateable settings from stored config to a running engine.
- * Called after saving settings to ensure the engine picks up changes immediately.
+ * Called during settings save so invalid runtime changes fail before persistence.
  */
-export function propagateSettingsToEngine(
+export async function propagateSettingsToEngine(
   engine: ExecutionEngine | null | undefined,
   newConfig: StoredConfig,
-): void {
+  previousConfig?: StoredConfig,
+): Promise<void> {
   if (!engine) return;
+
+  // Resolve agent priority: agent -> defaultAgent -> default agents[] entry -> first agents[] entry.
+  const getConfiguredAgentName = (config: StoredConfig | undefined): string | undefined =>
+    config?.agent ??
+    config?.defaultAgent ??
+    config?.agents?.find((agent) => agent.default)?.name ??
+    config?.agents?.[0]?.name;
+
+  // Trim model values and treat empty strings as undefined.
+  const normalizeModel = (model: string | undefined): string | undefined => {
+    const trimmed = model?.trim();
+    return trimmed ? trimmed : undefined;
+  };
+
+  const previousAgentName = getConfiguredAgentName(previousConfig);
+  const nextAgentName = getConfiguredAgentName(newConfig);
+  const previousModel = normalizeModel(previousConfig?.model);
+  const nextModel = normalizeModel(newConfig.model);
+  // Switch on initial config with agent/model, or when resolved agent/model changed.
+  // When true, getDefaultAgentConfig feeds engine.switchToUserAgent(agentConfig, nextModel).
+  const shouldSwitchAgent =
+    previousConfig === undefined
+      ? nextAgentName !== undefined || nextModel !== undefined
+      : previousAgentName !== nextAgentName || previousModel !== nextModel;
+
+  if (shouldSwitchAgent) {
+    const agentConfig = getDefaultAgentConfig(newConfig, {});
+    if (!agentConfig) {
+      throw new Error('No agent configured');
+    }
+    await engine.switchToUserAgent(agentConfig, nextModel);
+  }
+
   if (newConfig.autoCommit !== undefined) {
     engine.setAutoCommit(newConfig.autoCommit);
   }
@@ -1733,9 +1767,9 @@ function RunAppWrapper({
 
   // Handle settings save
   const handleSaveSettings = async (newConfig: StoredConfig): Promise<void> => {
+    await propagateSettingsToEngine(engine, newConfig, storedConfig);
     await saveProjectConfig(newConfig, cwd);
     setStoredConfig(newConfig);
-    propagateSettingsToEngine(engine, newConfig);
   };
 
   // Handle loading available epics (engine absent in parallel mode)

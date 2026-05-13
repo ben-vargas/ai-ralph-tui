@@ -151,6 +151,15 @@ describe('GeminiAgentPlugin', () => {
       expect(result).toContain('gemini-');
     });
   });
+
+  describe('listModels', () => {
+    test('lists known Gemini models', () => {
+      expect(plugin.listModels()).toEqual([
+        'gemini-2.5-pro',
+        'gemini-2.5-flash',
+      ]);
+    });
+  });
 });
 
 describe('GeminiAgentPlugin buildArgs', () => {

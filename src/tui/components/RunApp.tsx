@@ -24,6 +24,11 @@ import { ProgressDashboard } from './ProgressDashboard.js';
 import { ConfirmationDialog } from './ConfirmationDialog.js';
 import { HelpOverlay } from './HelpOverlay.js';
 import { SettingsView } from './SettingsView.js';
+import {
+  AgentModelPicker,
+  resolveAgentConfigForSelection,
+  type AgentModelSelection,
+} from './AgentModelPicker.js';
 import { EpicLoaderOverlay } from './EpicLoaderOverlay.js';
 import type { EpicLoaderMode } from './EpicLoaderOverlay.js';
 import { SubagentTreePanel } from './SubagentTreePanel.js';
@@ -632,6 +637,8 @@ export function RunApp({
   const [showHelp, setShowHelp] = useState(false);
   // Settings view state
   const [showSettings, setShowSettings] = useState(false);
+  // Agent/model picker state
+  const [showAgentModelPicker, setShowAgentModelPicker] = useState(false);
   // Remote config view state
   const [showRemoteConfig, setShowRemoteConfig] = useState(false);
   const [remoteConfigData, setRemoteConfigData] = useState<RemoteConfigData | null>(null);
@@ -1100,6 +1107,43 @@ export function RunApp({
   // Compute display tracker and model for local vs remote
   const displayTrackerName = isViewingRemote ? (remoteTrackerName ?? trackerName) : trackerName;
   const displayModel = isViewingRemote ? (remoteModel ?? currentModel) : localModel;
+
+  const handleAgentModelConfirm = useCallback(
+    async (selection: AgentModelSelection): Promise<void> => {
+      if (!engine) {
+        throw new Error('Agent switching is not available in this mode');
+      }
+
+      if (selection.saveAsDefault) {
+        if (!storedConfig || !onSaveSettings) {
+          throw new Error('Settings save is not available');
+        }
+
+        const nextConfig: StoredConfig = {
+          ...storedConfig,
+          agent: selection.agentName,
+          defaultAgent: selection.agentName,
+        };
+        if (selection.model) {
+          nextConfig.model = selection.model;
+        } else {
+          delete nextConfig.model;
+        }
+
+        await onSaveSettings(nextConfig);
+        setDetectedModel(selection.model ?? '');
+        return;
+      }
+
+      const agentConfig = resolveAgentConfigForSelection(
+        selection.agentName,
+        storedConfig?.agents ?? []
+      );
+      await engine.switchToUserAgent(agentConfig, selection.model);
+      setDetectedModel(selection.model ?? '');
+    },
+    [engine, onSaveSettings, storedConfig]
+  );
 
   // Resolve model context windows for live local/remote usage indicators.
   const modelContextCacheRef = useRef<Map<string, number | null>>(new Map());
@@ -2091,6 +2135,11 @@ export function RunApp({
         return;
       }
 
+      // When agent/model picker is showing, let it handle its own keyboard events
+      if (showAgentModelPicker) {
+        return;
+      }
+
       // When remote config view is showing, let it handle its own keyboard events
       // Closing is handled by RemoteConfigView internally via onClose callback
       if (showRemoteConfig) {
@@ -2620,12 +2669,24 @@ export function RunApp({
           }
           break;
 
-        // Remote management: 'a' to add new remote
+        // Agent/model picker: 'a' opens the local picker.
+        // Shift+A keeps the remote add flow available without stealing lowercase 'a'.
         case 'a':
-          // Open add remote overlay
-          setRemoteManagementMode('add');
-          setEditingRemote(undefined);
-          setShowRemoteManagement(true);
+          if (key.sequence === 'A') {
+            setRemoteManagementMode('add');
+            setEditingRemote(undefined);
+            setShowRemoteManagement(true);
+            break;
+          }
+          if (isViewingRemote) {
+            setInfoFeedback('Agent/model picker is available on the local tab');
+            break;
+          }
+          if (!engine) {
+            setInfoFeedback('Agent/model picker is not available in this mode');
+            break;
+          }
+          setShowAgentModelPicker(true);
           break;
 
         // Remote management: 'e' to edit current remote (only when viewing a remote tab)
@@ -2688,7 +2749,7 @@ export function RunApp({
           break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showQuitDialog, showKillDialog, showParallelSummaryOverlay, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager, isParallelMode, parallelWorkers, parallelConflicts, showConflictPanel, onParallelKill, onParallelPause, onParallelResume, onParallelStart, parallelDerivedStatus, onRefreshTasks]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showAgentModelPicker, showQuitDialog, showKillDialog, showParallelSummaryOverlay, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager, isParallelMode, parallelWorkers, parallelConflicts, showConflictPanel, onParallelKill, onParallelPause, onParallelResume, onParallelStart, parallelDerivedStatus, onRefreshTasks]
   );
 
   useKeyboard(handleKeyboard);
@@ -3784,6 +3845,16 @@ export function RunApp({
           onClose={() => setShowSettings(false)}
         />
       )}
+
+      <AgentModelPicker
+        visible={showAgentModelPicker}
+        agents={availableAgents}
+        agentConfigs={storedConfig?.agents}
+        currentAgent={baseAgentName}
+        currentModel={localModel}
+        onConfirm={handleAgentModelConfirm}
+        onClose={() => setShowAgentModelPicker(false)}
+      />
 
       {/* Remote Config View */}
       <RemoteConfigView

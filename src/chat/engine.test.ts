@@ -111,6 +111,7 @@ function createMockAgent(responseText = 'mock response'): {
     getSetupQuestions: () => [],
     validateSetup: async () => null,
     validateModel: () => null,
+    listModels: () => [],
     getSandboxRequirements: () => ({
       authPaths: [],
       binaryPaths: [],

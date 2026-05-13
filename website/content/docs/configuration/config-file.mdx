@@ -35,6 +35,9 @@ Here's a fully annotated configuration file showing all available options:
 # Default agent plugin name
 agent = "claude"
 
+# Default model for the selected agent (optional)
+model = "sonnet"
+
 # Custom command (optional) - use wrapper tools like Claude Code Router
 # command = "ccr code"
 
@@ -82,8 +85,8 @@ subagentTracingDetail = "minimal"
 # ─────────────────────────────────────────────
 
 [agentOptions]
-# These options are passed to the selected agent plugin
-model = "claude-sonnet-4-20250514"
+# These options are passed to the selected agent plugin.
+# Prefer top-level `model` for the default runtime model.
 
 # ─────────────────────────────────────────────
 # Tracker Options (shorthand)

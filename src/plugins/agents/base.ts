@@ -1067,6 +1067,14 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
   }
 
   /**
+   * List known model names for this agent.
+   * Default implementation returns an empty list for open-ended model names.
+   */
+  listModels(): string[] {
+    return [];
+  }
+
+  /**
    * Run a preflight check to verify the agent is fully operational.
    * Default implementation runs a minimal test prompt and checks for any response.
    * Subclasses can override for agent-specific preflight logic.

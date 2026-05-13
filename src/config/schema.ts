@@ -162,6 +162,7 @@ export const StoredConfigSchema = z
 
     // Agent-specific options (shorthand for common settings)
     agent: z.string().optional(),
+    model: z.string().optional(),
     agentCommand: z.string().optional(),
     /**
      * Custom command/executable path for the agent.

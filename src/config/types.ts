@@ -269,6 +269,9 @@ export interface StoredConfig {
   /** Shorthand: agent plugin name */
   agent?: string;
 
+  /** Shorthand: model override for the selected agent */
+  model?: string;
+
   /** Legacy alias: agent command name */
   agentCommand?: string;
 

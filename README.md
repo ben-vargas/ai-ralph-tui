@@ -148,13 +148,14 @@ ralph-tui create-prd --output ./docs
 | `T` | Toggle subagent tree panel (Shift+T) |
 | `t` | Cycle subagent detail level |
 | `o` | Cycle right panel views |
+| `a` | Open agent/model picker (local tab only) |
 | `,` | Open settings (local tab only) |
 | `C` | Open read-only config viewer (Shift+C, works on local and remote tabs) |
 | `q` | Quit |
 | `?` | Show help |
 | `1-9` | Switch to tab 1-9 (remote instances) |
 | `[` / `]` | Previous/Next tab |
-| `a` | Add new remote instance |
+| `A` | Add new remote instance |
 | `e` | Edit current remote (when viewing remote tab) |
 | `x` | Delete current remote (when viewing remote tab) |
 
@@ -393,7 +394,7 @@ The first tab is always "Local" (your current machine). Remote tabs show the ali
 
 You can add, edit, and delete remote servers directly from the TUI without leaving the interface:
 
-**Add Remote (`a` key):**
+**Add Remote (`A` key):**
 Opens a form dialog to configure a new remote:
 - **Alias**: A short name for the remote (e.g., "prod", "dev-server")
 - **Host**: The server address (e.g., "192.168.1.100", "server.example.com")
