@@ -248,6 +248,8 @@ function mergeConfigs(
   if (project.progressFile !== undefined)
     merged.progressFile = project.progressFile;
   if (project.autoCommit !== undefined) merged.autoCommit = project.autoCommit;
+  if (project.commitMessageTemplate !== undefined)
+    merged.commitMessageTemplate = project.commitMessageTemplate;
   if (project.subagentTracingDetail !== undefined) {
     merged.subagentTracingDetail = project.subagentTracingDetail;
   }
@@ -704,6 +706,7 @@ export async function buildConfig(
     // CLI --prompt takes precedence over config file prompt_template
     promptTemplate: options.promptPath ?? storedConfig.prompt_template,
     autoCommit: storedConfig.autoCommit ?? false,
+    commitMessageTemplate: storedConfig.commitMessageTemplate,
   };
 }
 
