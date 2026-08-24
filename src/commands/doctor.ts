@@ -60,6 +60,11 @@ async function runDiagnostics(
   // reported "Unknown agent plugin" even for a plugin that `run` could
   // load fine.
   const userPluginResults = await registry.initialize();
+  for (const result of userPluginResults) {
+    if (!result.success && result.error) {
+      log(`  ⚠ ${result.error}`);
+    }
+  }
   if (process.env.RALPH_TUI_DEBUG_PLUGINS) {
     // User plugin load failures are otherwise silent — registry.initialize()
     // swallows the real error into a PluginLoadResult array that nothing
