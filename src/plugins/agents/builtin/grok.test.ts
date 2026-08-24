@@ -3,22 +3,40 @@
  * Tests configuration, argument building, and streaming-json parsing for Grok Build TUI.
  */
 
-import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
-import {
-  GrokAgentPlugin,
-  parseGrokJsonLine,
-  parseGrokOutputToEvents,
-} from './grok.js';
+import { describe, expect, test, beforeEach, afterEach, mock } from 'bun:test';
+import * as actualOs from 'node:os';
+
+let mockedPlatform = actualOs.platform();
+mock.module('node:os', () => ({
+  ...actualOs,
+  platform: () => mockedPlatform,
+}));
+
+// @ts-expect-error - Bun supports query strings in imports to get fresh module instances
+const grokModule = await import('./grok.js?test-platform') as typeof import('./grok.js');
+const { GrokAgentPlugin, parseGrokJsonLine, parseGrokOutputToEvents } = grokModule;
+
+class TestableGrokPlugin extends GrokAgentPlugin {
+  testBuildArgs(prompt: string): string[] {
+    return this.buildArgs(prompt);
+  }
+
+  testGetStdinInput(prompt: string): string | undefined {
+    return this.getStdinInput(prompt);
+  }
+}
 
 describe('GrokAgentPlugin', () => {
-  let plugin: GrokAgentPlugin;
+  let plugin: TestableGrokPlugin;
 
   beforeEach(() => {
-    plugin = new GrokAgentPlugin();
+    mockedPlatform = 'linux';
+    plugin = new TestableGrokPlugin();
   });
 
   afterEach(async () => {
     await plugin.dispose();
+    mockedPlatform = 'linux';
   });
 
   describe('meta', () => {
@@ -69,6 +87,8 @@ describe('GrokAgentPlugin', () => {
     test('accepts model configuration', async () => {
       await plugin.initialize({ model: 'grok-4.5' });
       expect(await plugin.isReady()).toBe(true);
+      const args = plugin.testBuildArgs('prompt');
+      expect(args).toContain('grok-4.5');
     });
 
     test('accepts timeout configuration', async () => {
@@ -110,6 +130,23 @@ describe('GrokAgentPlugin', () => {
     });
   });
 
+  describe('validateModel', () => {
+    test('accepts empty, whitespace, and custom model names', () => {
+      expect(plugin.validateModel('')).toBeNull();
+      expect(plugin.validateModel('   ')).toBeNull();
+      expect(plugin.validateModel('grok-custom')).toBeNull();
+    });
+  });
+
+  describe('detect', () => {
+    test('reports a clear error when grok is not installed', async () => {
+      await plugin.initialize({ command: '/definitely/missing/grok' });
+      const result = await plugin.detect();
+      expect(result.available).toBe(false);
+      expect(result.error).toContain('Grok CLI not found in PATH');
+    });
+  });
+
   describe('getSandboxRequirements', () => {
     test('includes ~/.grok auth path', () => {
       const reqs = plugin.getSandboxRequirements();
@@ -129,65 +166,55 @@ describe('GrokAgentPlugin', () => {
 });
 
 describe('GrokAgentPlugin buildArgs', () => {
-  let plugin: GrokAgentPlugin;
-
-  class TestableGrokPlugin extends GrokAgentPlugin {
-    testBuildArgs(prompt: string): string[] {
-      return (this as unknown as { buildArgs: (p: string) => string[] }).buildArgs(prompt);
-    }
-
-    testGetStdinInput(prompt: string): string | undefined {
-      return (this as unknown as { getStdinInput: (p: string) => string | undefined }).getStdinInput(
-        prompt
-      );
-    }
-  }
+  let plugin: TestableGrokPlugin;
 
   beforeEach(() => {
+    mockedPlatform = 'linux';
     plugin = new TestableGrokPlugin();
   });
 
   afterEach(async () => {
     await plugin.dispose();
+    mockedPlatform = 'linux';
   });
 
   test('includes --always-approve', async () => {
     await plugin.initialize({});
-    const args = (plugin as TestableGrokPlugin).testBuildArgs('test prompt');
+    const args = plugin.testBuildArgs('test prompt');
     expect(args).toContain('--always-approve');
   });
 
   test('includes --output-format streaming-json', async () => {
     await plugin.initialize({});
-    const args = (plugin as TestableGrokPlugin).testBuildArgs('test prompt');
+    const args = plugin.testBuildArgs('test prompt');
     expect(args).toContain('--output-format');
     expect(args).toContain('streaming-json');
   });
 
   test('does not use stream-json or dangerously-skip-permissions', async () => {
     await plugin.initialize({});
-    const args = (plugin as TestableGrokPlugin).testBuildArgs('test prompt');
+    const args = plugin.testBuildArgs('test prompt');
     expect(args).not.toContain('stream-json');
     expect(args).not.toContain('--dangerously-skip-permissions');
   });
 
   test('includes model flag when specified', async () => {
     await plugin.initialize({ model: 'grok-4.5' });
-    const args = (plugin as TestableGrokPlugin).testBuildArgs('test prompt');
+    const args = plugin.testBuildArgs('test prompt');
     expect(args).toContain('--model');
     expect(args).toContain('grok-4.5');
   });
 
   test('omits model flag when not specified', async () => {
     await plugin.initialize({});
-    const args = (plugin as TestableGrokPlugin).testBuildArgs('test prompt');
+    const args = plugin.testBuildArgs('test prompt');
     expect(args).not.toContain('--model');
   });
 
   test('uses stdin prompt delivery on non-Windows', async () => {
     await plugin.initialize({});
-    const args = (plugin as TestableGrokPlugin).testBuildArgs('my test prompt');
-    const stdinInput = (plugin as TestableGrokPlugin).testGetStdinInput('my test prompt');
+    const args = plugin.testBuildArgs('my test prompt');
+    const stdinInput = plugin.testGetStdinInput('my test prompt');
 
     if (process.platform === 'win32') {
       expect(args).toContain('-p');
@@ -198,6 +225,23 @@ describe('GrokAgentPlugin buildArgs', () => {
       expect(args).toContain('/dev/stdin');
       expect(stdinInput).toBe('my test prompt');
     }
+  });
+
+  test('uses the prompt argument on Windows', async () => {
+    mockedPlatform = 'win32';
+    await plugin.initialize({ model: 'grok-4.5' });
+    const args = plugin.testBuildArgs('my Windows prompt');
+
+    expect(args).toEqual([
+      '--always-approve',
+      '--output-format',
+      'streaming-json',
+      '-p',
+      'my Windows prompt',
+      '--model',
+      'grok-4.5',
+    ]);
+    expect(plugin.testGetStdinInput('my Windows prompt')).toBeUndefined();
   });
 });
 
