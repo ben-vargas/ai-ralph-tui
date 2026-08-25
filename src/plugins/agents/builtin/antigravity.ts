@@ -135,7 +135,7 @@ export function parseAntigravityOutputToEvents(data: string): AgentDisplayEvent[
 /**
  * Antigravity CLI agent plugin implementation.
  * Uses the `agy` CLI with stream-json output for non-interactive AI coding tasks.
- * Prompt is delivered via stdin (do not pass --print; that flag requires a prompt arg).
+ * Prompt is delivered via stdin (do not pass --print; that flag consumes the next argument as the prompt).
  */
 export class AntigravityAgentPlugin extends BaseAgentPlugin {
   readonly meta: AgentPluginMeta = {
@@ -309,8 +309,8 @@ export class AntigravityAgentPlugin extends BaseAgentPlugin {
   ): string[] {
     const args: string[] = [];
 
-    // stream-json triggers non-interactive print-style output when stdin provides the prompt.
-    // Do not pass --print/--prompt: those flags require a prompt argument and will not read stdin.
+    // agy runs non-interactively whenever stdin is not a terminal, so the prompt is piped in.
+    // Do not pass --print/--prompt: those flags consume the next argument as the prompt.
     args.push('--output-format', 'stream-json');
 
     if (this.skipPermissions) {
@@ -326,7 +326,7 @@ export class AntigravityAgentPlugin extends BaseAgentPlugin {
 
   /**
    * Provide the prompt via stdin.
-   * agy reads stdin when --print/--prompt is omitted (verified with --output-format stream-json).
+   * agy reads the prompt from stdin when --print/--prompt is omitted and stdin is not a terminal.
    */
   protected override getStdinInput(
     prompt: string,
@@ -466,7 +466,7 @@ export class AntigravityAgentPlugin extends BaseAgentPlugin {
       '  1. Test agy directly: printf "hello" | agy --output-format text --dangerously-skip-permissions\n' +
       '  2. Check install: agy --version\n' +
       '  3. List models: agy models\n' +
-      '  4. Confirm auth under ~/.gemini (oauth_creds.json)'
+      '  4. Sign in: run agy interactively, then retry (tokens live in the OS keyring)'
     );
   }
 }

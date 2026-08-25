@@ -20,7 +20,9 @@ agy --version
 agy models
 ```
 
-Authenticate with your Google account so credentials exist under `~/.gemini` (for example `oauth_creds.json`).
+Run `agy` once interactively and complete the Google sign-in. Antigravity stores its session tokens in the OS keyring (macOS Keychain, Linux secret-service via D-Bus, Windows Credential Manager), not in a file — `~/.gemini` holds configuration and skills only.
+
+Headless runs reuse those cached credentials, so the keyring must be reachable and unlocked. On a headless Linux box or over SSH, make sure a D-Bus session and keyring daemon are running (`export $(dbus-launch)`), otherwise `agy` fails with a locked-keyring error. An unauthenticated headless run exits with `authentication required` rather than hanging.
 
 ## Basic Usage
 
@@ -119,7 +121,7 @@ Or toggle in TUI:
 When Ralph TUI executes a task with Antigravity:
 
 1. **Build command**: `agy --output-format stream-json [--dangerously-skip-permissions] [--model …]`
-2. **Pass prompt via stdin**: Avoids shell escaping; `--print` is omitted because that flag requires a prompt argument
+2. **Pass prompt via stdin**: Avoids shell escaping; `--print` / `-p` is omitted because it takes the prompt as its own value
 3. **Stream output**: Captures stdout JSONL in real time
 4. **Parse events**: Maps step updates and results into display events
 5. **Detect completion**: Watches for process exit
@@ -135,7 +137,7 @@ agy \
 ```
 
 <Callout type="info">
-Do not pass `--print` / `-p` when using stdin. Those flags take the prompt as an argument; with `--output-format stream-json`, `agy` reads the prompt from stdin and runs non-interactively.
+Do not pass `--print` / `-p` when using stdin. Those flags consume the next argument as the prompt (`agy -p --output-format stream-json` is rejected because `-p` swallows the flag). `agy` runs non-interactively whenever stdin is not a terminal, which is always the case when Ralph TUI spawns it, so the prompt is piped instead.
 </Callout>
 
 ## Troubleshooting
@@ -147,11 +149,11 @@ agy --version
 which agy
 ```
 
-Install the Antigravity CLI and ensure Homebrew (or your install path) is on `PATH`.
+Install the Antigravity CLI and ensure its install directory is on `PATH` — the official installer places `agy` in `~/.local/bin` on macOS and Linux.
 
 ### Auth / permission errors
 
-Confirm credentials under `~/.gemini` and re-authenticate if needed. For autonomous runs, keep `skipPermissions = true` so Ralph TUI passes `--dangerously-skip-permissions`.
+Re-authenticate by running `agy` interactively and signing in again. If the CLI reports a locked or unreachable keyring, unlock the system keyring (see the Antigravity CLI troubleshooting guide) — `~/.gemini` existing is not evidence of a valid session, since the installer creates it. For autonomous runs, keep `skipPermissions = true` so Ralph TUI passes `--dangerously-skip-permissions`.
 
 ### Invalid model
 
