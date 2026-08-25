@@ -135,12 +135,17 @@ Ralph TUI builds these arguments:
 
 ```bash
 grok \
-  --always-approve \                 # Auto-approve tool executions
-  --output-format streaming-json \   # Structured NDJSON for parsing
-  --prompt-file /dev/stdin \         # Read prompt from stdin (Unix)
-  --model grok-4.5 \                 # If model specified
+  --always-approve \
+  --output-format streaming-json \
+  --prompt-file /dev/stdin \
+  --model grok-4.5 \
   < prompt.txt
 ```
+
+- `--always-approve` — auto-approve tool executions
+- `--output-format streaming-json` — structured NDJSON for parsing
+- `--prompt-file /dev/stdin` — read the prompt from stdin (Unix)
+- `--model` — only present when a model is configured
 
 On Windows, the prompt is passed with `-p` instead of `--prompt-file /dev/stdin`.
 
