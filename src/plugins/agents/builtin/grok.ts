@@ -126,8 +126,8 @@ export class GrokAgentPlugin extends BaseAgentPlugin {
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
 
-    if (typeof config.model === 'string' && config.model.length > 0) {
-      this.model = config.model;
+    if (typeof config.model === 'string' && config.model.trim().length > 0) {
+      this.model = config.model.trim();
     }
 
     if (typeof config.timeout === 'number' && config.timeout > 0) {

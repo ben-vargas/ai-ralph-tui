@@ -211,6 +211,18 @@ describe('GrokAgentPlugin buildArgs', () => {
     expect(args).not.toContain('--model');
   });
 
+  test('treats a whitespace-only model as unset', async () => {
+    await plugin.initialize({ model: '   ' });
+    const args = plugin.testBuildArgs('test prompt');
+    expect(args).not.toContain('--model');
+  });
+
+  test('trims surrounding whitespace from the model', async () => {
+    await plugin.initialize({ model: '  grok-4.5  ' });
+    const args = plugin.testBuildArgs('test prompt');
+    expect(args).toContain('grok-4.5');
+  });
+
   test('uses stdin prompt delivery on non-Windows', async () => {
     await plugin.initialize({});
     const args = plugin.testBuildArgs('my test prompt');
