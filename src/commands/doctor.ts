@@ -65,7 +65,7 @@ async function runDiagnostics(
       log(`  ⚠ ${result.error}`);
     }
   }
-  if (process.env.RALPH_TUI_DEBUG_PLUGINS) {
+  if (process.env.RALPH_TUI_DEBUG_PLUGINS === '1') {
     // User plugin load failures are otherwise silent — registry.initialize()
     // swallows the real error into a PluginLoadResult array that nothing
     // prints. Opt-in dump for diagnosing why a custom plugin didn't register.
