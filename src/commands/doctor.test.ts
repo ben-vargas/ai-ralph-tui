@@ -257,6 +257,25 @@ describe('doctor command', () => {
       expect(output).toContain('HEALTHY');
     });
 
+    test('does not emit plugin debug results when debug flag is 0', async () => {
+      const originalDebugFlag = process.env.RALPH_TUI_DEBUG_PLUGINS;
+      process.env.RALPH_TUI_DEBUG_PLUGINS = '0';
+
+      try {
+        await executeDoctorCommand(['--cwd', tempDir]);
+      } catch {
+        // Expected - process.exit is called
+      } finally {
+        if (originalDebugFlag === undefined) {
+          delete process.env.RALPH_TUI_DEBUG_PLUGINS;
+        } else {
+          process.env.RALPH_TUI_DEBUG_PLUGINS = originalDebugFlag;
+        }
+      }
+
+      expect(capturedErrors.join('\n')).not.toContain('DEBUG user plugin load results:');
+    });
+
     test('reports unhealthy when detection fails', async () => {
       mockDetectResult = { available: false, error: 'CLI not found' };
 
