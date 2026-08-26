@@ -407,17 +407,44 @@ describe('createTaskChatEngine model propagation', () => {
   });
 });
 
+describe('ChatEngine timeout configuration', () => {
+  test('uses the ten-minute default when timeout is omitted', async () => {
+    const { agent, getCapturedOptions } = createMockAgent();
+    const engine = createPrdChatEngine(agent, {});
+
+    await engine.sendMessage('Use the default timeout');
+
+    expect(getCapturedOptions()?.timeout).toBe(600000);
+  });
+
+  test('passes an explicit zero timeout through as unlimited', async () => {
+    const { agent, getCapturedOptions } = createMockAgent();
+    const engine = createTaskChatEngine(agent, { timeout: 0 });
+
+    await engine.sendMessage('Do not apply a timeout');
+
+    expect(getCapturedOptions()?.timeout).toBe(0);
+  });
+
+  test('honors an explicit positive timeout', async () => {
+    const { agent, getCapturedOptions } = createMockAgent();
+    const engine = createPrdChatEngine(agent, {
+      timeout: 5000,
+    });
+
+    await engine.sendMessage('Use the configured timeout');
+
+    expect(getCapturedOptions()?.timeout).toBe(5000);
+  });
+});
+
 describe('ChatEngine timeout recovery', () => {
   test('interrupts timed-out executions and emits timeout and retry events', async () => {
     const { agent, getInterrupt } = createTimeoutThenSuccessAgent();
     const engine = new ChatEngine({
       agent,
       systemPrompt: 'Test prompt.',
-      timeout: 1000,
-      timeoutConfig: {
-        timeoutMultiplier: 2,
-        maxTimeout: 2500,
-      },
+      timeout: 1000000,
     });
     const events: string[] = [];
     const retryTimeouts: number[] = [];
@@ -447,7 +474,7 @@ describe('ChatEngine timeout recovery', () => {
     await firstRetryTimeout;
 
     expect(engine.getTimeoutState().retryCount).toBe(1);
-    expect(engine.getTimeoutState().currentTimeout).toBe(2000);
+    expect(engine.getTimeoutState().currentTimeout).toBe(1500000);
 
     const successfulRetry = new Promise<void>((resolve) => {
       const unsubscribe = engine.on((event) => {
@@ -460,7 +487,7 @@ describe('ChatEngine timeout recovery', () => {
     engine.retry();
     await successfulRetry;
 
-    expect(retryTimeouts).toEqual([2000, 2500]);
+    expect(retryTimeouts).toEqual([1500000, 1800000]);
     expect(getInterrupt()).toHaveBeenCalledTimes(2);
     expect(engine.getStatus()).toBe('idle');
     expect(events).toContain('retry:started');

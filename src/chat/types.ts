@@ -44,9 +44,9 @@ export type ChatStatus =
  * Timeout configuration for chat engine.
  */
 export interface TimeoutConfig {
-  /** Initial timeout in milliseconds (default: 60000 = 1 minute) */
+  /** Initial timeout in milliseconds (default: 600000 = 10 minutes) */
   initialTimeout: number;
-  /** Maximum timeout in milliseconds (default: 300000 = 5 minutes) */
+  /** Maximum timeout in milliseconds (default: 1800000 = 30 minutes) */
   maxTimeout: number;
   /** Timeout multiplier for each retry (default: 1.5) */
   timeoutMultiplier: number;
@@ -60,8 +60,8 @@ export interface TimeoutConfig {
  * Default timeout configuration.
  */
 export const DEFAULT_TIMEOUT_CONFIG: TimeoutConfig = {
-  initialTimeout: 60000, // 1 minute
-  maxTimeout: 300000, // 5 minutes
+  initialTimeout: 600000, // 10 minutes
+  maxTimeout: 1800000, // 30 minutes
   timeoutMultiplier: 1.5,
   maxRetries: 3,
   enableRetries: true,

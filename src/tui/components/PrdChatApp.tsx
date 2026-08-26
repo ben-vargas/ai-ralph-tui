@@ -425,7 +425,7 @@ export function PrdChatApp({
   agent,
   cwd = process.cwd(),
   outputDir = 'tasks',
-  timeout = 0,
+  timeout,
   prdSkill,
   prdSkillSource,
   model,

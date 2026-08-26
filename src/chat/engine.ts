@@ -88,12 +88,14 @@ export class ChatEngine {
       ...DEFAULT_TIMEOUT_CONFIG,
       ...config.timeoutConfig,
     };
+    const effectiveTimeout =
+      config.timeout === undefined ? timeoutConfig.initialTimeout : config.timeout;
 
     this.config = {
       agent: config.agent,
       systemPrompt: config.systemPrompt,
       maxHistoryMessages: config.maxHistoryMessages ?? 50,
-      timeout: config.timeout ?? 0, // 0 = no timeout by default
+      timeout: effectiveTimeout,
       cwd: config.cwd ?? process.cwd(),
       agentOptions: config.agentOptions ?? {},
       timeoutConfig,
@@ -102,9 +104,7 @@ export class ChatEngine {
     // Initialize timeout state
     this.timeoutState = {
       retryCount: 0,
-      currentTimeout: this.config.timeout > 0
-        ? this.config.timeout
-        : timeoutConfig.initialTimeout,
+      currentTimeout: this.config.timeout,
       retryPending: false,
     };
   }
@@ -188,9 +188,7 @@ export class ChatEngine {
     // Reset state
     this.timeoutState.retryPending = false;
     this.timeoutState.retryCount = 0;
-    this.timeoutState.currentTimeout = this.config.timeout > 0
-      ? this.config.timeout
-      : this.config.timeoutConfig.initialTimeout;
+    this.timeoutState.currentTimeout = this.config.timeout;
     this.pendingUserMessage = null;
     this.pendingOptions = null;
 
@@ -343,9 +341,7 @@ export class ChatEngine {
 
     // Reset retry state for new messages
     this.timeoutState.retryCount = 0;
-    this.timeoutState.currentTimeout = this.config.timeout > 0
-      ? this.config.timeout
-      : this.config.timeoutConfig.initialTimeout;
+    this.timeoutState.currentTimeout = this.config.timeout;
 
     return await this._sendMessageInternal(content, options, false);
   }
@@ -442,9 +438,7 @@ export class ChatEngine {
 
       // Reset retry state on success
       this.timeoutState.retryCount = 0;
-      this.timeoutState.currentTimeout = this.config.timeout > 0
-        ? this.config.timeout
-        : this.config.timeoutConfig.initialTimeout;
+      this.timeoutState.currentTimeout = this.config.timeout;
 
       // Create and store the assistant message
       const assistantMessage: ChatMessage = {
@@ -596,9 +590,7 @@ export class ChatEngine {
     this.messages = [];
     this.timeoutState = {
       retryCount: 0,
-      currentTimeout: this.config.timeout > 0
-        ? this.config.timeout
-        : this.config.timeoutConfig.initialTimeout,
+      currentTimeout: this.config.timeout,
       retryPending: false,
     };
     this.pendingUserMessage = null;
@@ -650,7 +642,7 @@ export function createPrdChatEngine(
     agent,
     systemPrompt,
     cwd: options.cwd,
-    timeout: options.timeout ?? 60000, // Default 1 minute timeout
+    timeout: options.timeout,
     timeoutConfig: options.timeoutConfig,
     ...(flags ? { agentOptions: { flags } } : {}),
   });
@@ -671,7 +663,7 @@ export function createTaskChatEngine(
     agent,
     systemPrompt: TASK_SYSTEM_PROMPT,
     cwd: options.cwd,
-    timeout: options.timeout ?? 60000, // Default 1 minute timeout
+    timeout: options.timeout,
     timeoutConfig: options.timeoutConfig,
     ...(flags ? { agentOptions: { flags } } : {}),
   });
