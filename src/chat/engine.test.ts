@@ -4,7 +4,7 @@
  * and that buildPrompt uses markdown formatting (not XML tags) for CLI agent compatibility.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, mock } from 'bun:test';
 import {
   ChatEngine,
   buildPrdSystemPromptFromSkillSource,
@@ -125,6 +125,62 @@ function createMockAgent(responseText = 'mock response'): {
     agent,
     getCapturedPrompt: () => capturedPrompt,
     getCapturedOptions: () => capturedOptions,
+  };
+}
+
+function createTimeoutThenSuccessAgent(): {
+  agent: AgentPlugin;
+  getInterrupt: () => ReturnType<typeof mock>;
+} {
+  const { agent } = createMockAgent('retry response');
+  let executionCount = 0;
+  const interrupt = mock(() => {});
+
+  agent.execute = () => {
+    executionCount++;
+    if (executionCount <= 2) {
+      const timeoutResult: AgentExecutionResult = {
+        executionId: 'timeout-exec',
+        status: 'timeout',
+        stdout: '',
+        stderr: '',
+        durationMs: 10,
+        interrupted: false,
+        startedAt: new Date().toISOString(),
+        endedAt: new Date().toISOString(),
+      };
+
+      return {
+        executionId: 'timeout-exec',
+        promise: Promise.resolve(timeoutResult),
+        interrupt,
+        isRunning: () => true,
+      };
+    }
+
+    const completedResult: AgentExecutionResult = {
+      executionId: 'retry-exec',
+      status: 'completed',
+      exitCode: 0,
+      stdout: 'retry response',
+      stderr: '',
+      durationMs: 10,
+      interrupted: false,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+    };
+
+    return {
+      executionId: 'retry-exec',
+      promise: Promise.resolve(completedResult),
+      interrupt: () => {},
+      isRunning: () => false,
+    };
+  };
+
+  return {
+    agent,
+    getInterrupt: () => interrupt,
   };
 }
 
@@ -348,5 +404,67 @@ describe('createTaskChatEngine model propagation', () => {
 
     const flags = getCapturedOptions()?.flags;
     expect(flags === undefined || !flags.includes('--model')).toBe(true);
+  });
+});
+
+describe('ChatEngine timeout recovery', () => {
+  test('interrupts timed-out executions and emits timeout and retry events', async () => {
+    const { agent, getInterrupt } = createTimeoutThenSuccessAgent();
+    const engine = new ChatEngine({
+      agent,
+      systemPrompt: 'Test prompt.',
+      timeout: 1000,
+      timeoutConfig: {
+        timeoutMultiplier: 2,
+        maxTimeout: 2500,
+      },
+    });
+    const events: string[] = [];
+    const retryTimeouts: number[] = [];
+    engine.on((event) => {
+      events.push(event.type);
+      if (event.type === 'retry:started') {
+        retryTimeouts.push(event.timeoutState.currentTimeout);
+      }
+    });
+
+    const result = await engine.sendMessage('Wait for the response');
+
+    expect(result.success).toBe(false);
+    expect(getInterrupt()).toHaveBeenCalledTimes(1);
+    expect(engine.getStatus()).toBe('timeout');
+    expect(events).toContain('timeout:occurred');
+
+    const firstRetryTimeout = new Promise<void>((resolve) => {
+      const unsubscribe = engine.on((event) => {
+        if (event.type === 'timeout:occurred') {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    engine.retry();
+    await firstRetryTimeout;
+
+    expect(engine.getTimeoutState().retryCount).toBe(1);
+    expect(engine.getTimeoutState().currentTimeout).toBe(2000);
+
+    const successfulRetry = new Promise<void>((resolve) => {
+      const unsubscribe = engine.on((event) => {
+        if (event.type === 'message:received') {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    engine.retry();
+    await successfulRetry;
+
+    expect(retryTimeouts).toEqual([2000, 2500]);
+    expect(getInterrupt()).toHaveBeenCalledTimes(2);
+    expect(engine.getStatus()).toBe('idle');
+    expect(events).toContain('retry:started');
+    expect(events).toContain('message:received');
+    expect(engine.getHistory().at(-1)?.content).toBe('retry response');
   });
 });

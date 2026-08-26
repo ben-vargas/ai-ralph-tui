@@ -410,7 +410,6 @@ export class ChatEngine {
       this.currentExecution = handle;
 
       const result = await handle.promise;
-      this.currentExecution = null;
 
       const durationMs = Date.now() - startTime;
 
@@ -418,6 +417,8 @@ export class ChatEngine {
         // Handle timeout
         return await this.handleTimeout(content, options, durationMs);
       }
+
+      this.currentExecution = null;
 
       if (result.status !== 'completed') {
         this.setStatus('error');
@@ -511,6 +512,7 @@ export class ChatEngine {
     if (this.currentExecution?.isRunning()) {
       this.currentExecution.interrupt();
     }
+    this.currentExecution = null;
 
     // Update state
     this.timeoutState.retryPending = true;

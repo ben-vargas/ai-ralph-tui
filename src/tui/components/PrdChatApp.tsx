@@ -473,6 +473,9 @@ export function PrdChatApp({
   // Refs
   const engineRef = useRef<ChatEngine | null>(null);
   const taskEngineRef = useRef<ChatEngine | null>(null);
+  const timeoutEngineRef = useRef<ChatEngine | null>(null);
+  const retryInFlightRef = useRef(false);
+  const retryResponseHandledRef = useRef(false);
   const isMountedRef = useRef(true);
   // Ref for inserting text into the chat input (used for image markers)
   const insertTextRef = useRef<((text: string) => void) | null>(null);
@@ -518,18 +521,35 @@ export function PrdChatApp({
     });
     const taskEngine = createTaskChatEngine(agent, { cwd, timeout, model });
 
-    // Subscribe to events
-    const unsubscribe = engine.on((event: ChatEvent) => {
+    const handleEngineEvent = (sourceEngine: ChatEngine, event: ChatEvent) => {
       switch (event.type) {
         case 'status:changed':
           break;
 
         case 'prd:detected':
-          // PRD was detected - save and switch to review phase
-          void handlePrdDetected(event.prdContent, event.featureName);
+          if (sourceEngine === engine) {
+            // PRD was detected - save and switch to review phase
+            void handlePrdDetected(event.prdContent, event.featureName);
+          }
+          break;
+
+        case 'message:received':
+          if (retryInFlightRef.current) {
+            retryInFlightRef.current = false;
+            retryResponseHandledRef.current = true;
+            if (isMountedRef.current) {
+              setMessages((prev) => [...prev, event.message]);
+              setStreamingChunk('');
+              setStreamingSegments([]);
+              setIsLoading(false);
+              setLoadingStatus('');
+            }
+          }
           break;
 
         case 'error:occurred':
+          retryInFlightRef.current = false;
+          retryResponseHandledRef.current = false;
           if (isMountedRef.current) {
             setError(event.error);
           }
@@ -537,6 +557,9 @@ export function PrdChatApp({
           break;
 
         case 'timeout:occurred':
+          timeoutEngineRef.current = sourceEngine;
+          retryInFlightRef.current = false;
+          retryResponseHandledRef.current = false;
           if (isMountedRef.current) {
             // Stop showing loading indicator
             setIsLoading(false);
@@ -546,6 +569,9 @@ export function PrdChatApp({
           break;
 
         case 'retry:started':
+          timeoutEngineRef.current = sourceEngine;
+          retryInFlightRef.current = true;
+          retryResponseHandledRef.current = false;
           if (isMountedRef.current) {
             setShowTimeoutDialog(false);
             setTimeoutState(event.timeoutState);
@@ -554,14 +580,25 @@ export function PrdChatApp({
           }
           break;
       }
-    });
+    };
+
+    const unsubscribeEngine = engine.on((event) =>
+      handleEngineEvent(engine, event)
+    );
+    const unsubscribeTaskEngine = taskEngine.on((event) =>
+      handleEngineEvent(taskEngine, event)
+    );
 
     engineRef.current = engine;
     taskEngineRef.current = taskEngine;
 
     return () => {
       isMountedRef.current = false;
-      unsubscribe();
+      unsubscribeEngine();
+      unsubscribeTaskEngine();
+      timeoutEngineRef.current = null;
+      retryInFlightRef.current = false;
+      retryResponseHandledRef.current = false;
     };
   }, [agent, cwd, timeout, prdSkill, prdSkillSource, model, onError]);
 
@@ -631,7 +668,8 @@ Send "1", "2", or "3" to choose an option, or continue chatting.`,
    */
   const handleTrackerSelect = useCallback(
     async (option: TrackerOption) => {
-      if (!taskEngineRef.current || !prdPath || !prdContent || isLoading)
+      const taskEngine = taskEngineRef.current;
+      if (!taskEngine || !prdPath || !prdContent || isLoading)
         return;
 
       const parsedPrd = parsePrdMarkdown(prdContent);
@@ -655,6 +693,7 @@ Send "1", "2", or "3" to choose an option, or continue chatting.`,
       setIsLoading(true);
       setStreamingChunk('');
       setStreamingSegments([]);
+      retryResponseHandledRef.current = false;
       setLoadingStatus(`Creating ${option.name} tasks...`);
 
       // Add user selection message
@@ -676,7 +715,7 @@ The PRD file is at: ${prdPath}
 Read the PRD and create the appropriate tasks.${labelsInstruction}`;
 
       try {
-        const result = await taskEngineRef.current.sendMessage(prompt, {
+        const result = await taskEngine.sendMessage(prompt, {
           onSegments: (segments) => {
             if (isMountedRef.current) {
               setStreamingSegments((prev) => [...prev, ...segments]);
@@ -690,8 +729,12 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
         });
 
         if (isMountedRef.current) {
+          const retryResponseHandled = retryResponseHandledRef.current;
+          retryResponseHandledRef.current = false;
           if (result.success && result.response) {
-            setMessages((prev) => [...prev, result.response!]);
+            if (!retryResponseHandled) {
+              setMessages((prev) => [...prev, result.response!]);
+            }
             setStreamingChunk('');
             setStreamingSegments([]);
 
@@ -703,7 +746,11 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
               timestamp: new Date(),
             };
             setMessages((prev) => [...prev, doneMsg]);
-          } else if (!result.success) {
+          } else if (
+            !result.success &&
+            taskEngine.getStatus() !== 'timeout' &&
+            !taskEngine.getTimeoutState().retryPending
+          ) {
             setError(result.error || 'Failed to create tasks');
           }
         }
@@ -790,7 +837,8 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
       }
 
       // Regular message - requires engine
-      if (!engineRef.current) {
+      const chatEngine = engineRef.current;
+      if (!chatEngine) {
         return;
       }
 
@@ -798,6 +846,7 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
       setIsLoading(true);
       setStreamingChunk('');
       setStreamingSegments([]);
+      retryResponseHandledRef.current = false;
       setLoadingStatus('Sending to agent...');
       setError(undefined);
 
@@ -823,7 +872,7 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
       const promptToSend = userMessage + imageSuffix;
 
       try {
-        const result = await engineRef.current.sendMessage(promptToSend, {
+        const result = await chatEngine.sendMessage(promptToSend, {
           onSegments: (segments) => {
             if (isMountedRef.current) {
               setStreamingSegments((prev) => [...prev, ...segments]);
@@ -837,11 +886,19 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
         });
 
         if (isMountedRef.current) {
+          const retryResponseHandled = retryResponseHandledRef.current;
+          retryResponseHandledRef.current = false;
           if (result.success && result.response) {
-            setMessages((prev) => [...prev, result.response!]);
+            if (!retryResponseHandled) {
+              setMessages((prev) => [...prev, result.response!]);
+            }
             setStreamingChunk('');
             setStreamingSegments([]);
-          } else if (!result.success) {
+          } else if (
+            !result.success &&
+            chatEngine.getStatus() !== 'timeout' &&
+            !chatEngine.getTimeoutState().retryPending
+          ) {
             setError(result.error || 'Failed to get response');
           }
         }
@@ -879,41 +936,45 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
    * Handle timeout dialog retry action
    */
   const handleTimeoutRetry = useCallback(() => {
-    if (!engineRef.current) return;
+    const timeoutEngine = timeoutEngineRef.current ?? engineRef.current;
+    if (!timeoutEngine) return;
 
     setShowTimeoutDialog(false);
     // Reset timeout-related state
     setTimeoutState(null);
     // Retry using the engine's built-in retry mechanism
-    engineRef.current.retry();
+    timeoutEngine.retry();
   }, []);
 
   /**
    * Handle timeout dialog cancel action
    */
   const handleTimeoutCancel = useCallback(() => {
-    if (!engineRef.current) return;
+    const timeoutEngine = timeoutEngineRef.current ?? engineRef.current;
+    if (!timeoutEngine) return;
 
     setShowTimeoutDialog(false);
     setTimeoutState(null);
     setIsLoading(false);
     setLoadingStatus('');
     // Tell the engine to cancel the timeout state
-    engineRef.current.cancelTimeout();
+    timeoutEngine.cancelTimeout();
+    timeoutEngineRef.current = null;
   }, []);
 
   /**
    * Handle continue waiting indefinitely - re-send with no timeout
    */
   const handleTimeoutContinue = useCallback(() => {
-    if (!engineRef.current) return;
+    const timeoutEngine = timeoutEngineRef.current ?? engineRef.current;
+    if (!timeoutEngine) return;
 
     setShowTimeoutDialog(false);
     setTimeoutState(null);
     setIsLoading(true);
     setLoadingStatus('Continuing to wait for agent response (no timeout)...');
     // Tell the engine to continue indefinitely
-    engineRef.current.continueIndefinitely();
+    timeoutEngine.continueIndefinitely();
   }, []);
 
   /**
