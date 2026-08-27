@@ -51,6 +51,7 @@ import {
 } from '../plugins/trackers/multi-scope.js';
 import type { ExecutionScope, TrackerPlugin, TrackerTask } from '../plugins/trackers/types.js';
 import { RunApp } from '../tui/components/RunApp.js';
+import { initializeAndReportPluginLoadFailures } from './plugin-load.js';
 
 /**
  * Check if there's a mismatch between tracker state and session state.
@@ -186,7 +187,10 @@ async function initializePlugins(): Promise<void> {
   const agentRegistry = getAgentRegistry();
   const trackerRegistry = getTrackerRegistry();
 
-  await Promise.all([agentRegistry.initialize(), trackerRegistry.initialize()]);
+  await initializeAndReportPluginLoadFailures(
+    () => agentRegistry.initialize(),
+    () => trackerRegistry.initialize()
+  );
 }
 
 /**
