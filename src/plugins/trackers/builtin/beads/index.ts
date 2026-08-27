@@ -86,12 +86,13 @@ interface DetectResult {
  */
 async function execBd(
   args: string[],
-  cwd?: string
+  cwd?: string,
+  envOverrides?: Record<string, string>
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const proc = spawn('bd', args, {
       cwd,
-      env: { ...process.env },
+      env: { ...process.env, ...envOverrides },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -238,6 +239,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   protected labels: string[] = [];
   private workingDir: string = process.cwd();
   private detectionError: string | undefined;
+  private beadsDirResolution: ReturnType<typeof resolveBeadsDir> | undefined;
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
@@ -276,6 +278,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
    */
   async detect(): Promise<DetectResult> {
     const beadsDir = resolveBeadsDir(this.workingDir, this.beadsDir);
+    this.beadsDirResolution = beadsDir;
     const beadsDirPath = beadsDir.path;
     try {
       await new Promise<void>((resolve, reject) => {
@@ -294,7 +297,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // Check for bd binary
     const { stdout, stderr, exitCode } = await execBd(
       ['--version'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -323,6 +327,13 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       this.detectionError = detection.error;
     }
     return this.ready;
+  }
+
+  private getCommandEnv(): Record<string, string> | undefined {
+    if (this.beadsDirResolution?.source === 'configured beadsDir') {
+      return { BEADS_DIR: this.beadsDirResolution.path };
+    }
+    return undefined;
   }
 
   getSetupQuestions(): SetupQuestion[] {
@@ -395,7 +406,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       args.push('--label', labelsToFilter.join(','));
     }
 
-    const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
+    const { stdout, exitCode, stderr } = await execBd(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error('bd list failed:', stderr);
@@ -465,7 +480,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   private async enrichTaskDependencies(task: TrackerTask): Promise<void> {
     const { stdout, stderr, exitCode } = await execBd(
       ['dep', 'list', task.id, '--json'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -511,7 +527,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   override async getTask(id: string): Promise<TrackerTask | undefined> {
     const { stdout, exitCode, stderr } = await execBd(
       ['show', id, '--json'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -546,7 +563,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       args.push('--reason', reason);
     }
 
-    const { exitCode, stderr, stdout } = await execBd(args, this.workingDir);
+    const { exitCode, stderr, stdout } = await execBd(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       return {
@@ -573,7 +594,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     const bdStatus = mapStatusToBd(status);
     const args = ['update', id, '--status', bdStatus];
 
-    const { exitCode, stderr } = await execBd(args, this.workingDir);
+    const { exitCode, stderr } = await execBd(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error(`bd update ${id} --status ${bdStatus} failed:`, stderr);
@@ -591,7 +616,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // See: https://github.com/subsy/ralph-tui/issues/314
     const { exitCode, stderr, stdout } = await execBd(
       ['sync', '--flush-only'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -636,7 +662,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       args.push('--label', this.labels.join(','));
     }
 
-    const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
+    const { stdout, exitCode, stderr } = await execBd(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error('bd list --type epic failed:', stderr);
@@ -713,7 +743,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       args.push('--assignee', filter.assignee);
     }
 
-    const { stdout, exitCode, stderr } = await execBd(args, this.workingDir);
+    const { stdout, exitCode, stderr } = await execBd(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error('bd ready failed:', stderr);
@@ -807,7 +841,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
 
     try {
       // Get epic to find external_ref with PRD link
-      const epicResult = await execBd(['show', epicId, '--json'], this.workingDir);
+    const epicResult = await execBd(
+      ['show', epicId, '--json'],
+      this.workingDir,
+      this.getCommandEnv()
+    );
       if (epicResult.exitCode !== 0) {
         return null;
       }
@@ -836,7 +874,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       // Get completion stats from epic children
       const childrenResult = await execBd(
         ['list', '--json', '--parent', epicId, '--limit', '0'],
-        this.workingDir
+        this.workingDir,
+        this.getCommandEnv()
       );
 
       let completedCount = 0;

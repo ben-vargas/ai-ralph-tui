@@ -15,7 +15,11 @@ let mockAccessFailPaths: string[] = [];
 let mockAccessPaths: string[] = [];
 const originalBeadsDir = process.env.BEADS_DIR;
 
-let mockSpawnArgs: Array<{ cmd: string; args: string[] }> = [];
+let mockSpawnArgs: Array<{
+  cmd: string;
+  args: string[];
+  env?: Record<string, string | undefined>;
+}> = [];
 
 let mockReadFileShouldFail = false;
 let mockReadFileContent = '';
@@ -76,8 +80,12 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
   beforeAll(async () => {
     // Apply mocks BEFORE importing the module under test
     mock.module('node:child_process', () => ({
-      spawn: (cmd: string, args: string[]) => {
-        mockSpawnArgs.push({ cmd, args });
+      spawn: (
+        cmd: string,
+        args: string[],
+        options?: { env?: Record<string, string | undefined> },
+      ) => {
+        mockSpawnArgs.push({ cmd, args, env: options?.env });
         const response = mockSpawnResponses.shift() ?? { exitCode: 1, stderr: 'no mock response' };
         return createMockChildProcess(response);
       },
@@ -182,6 +190,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(task?.id).toBe('t1');
       expect(mockAccessPaths).toContain('/shared/project/.beads');
       expect(mockAccessPaths).not.toContain('/test/.beads');
+      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBe('/shared/project/.beads');
     });
 
     test('resolves a relative BEADS_DIR under workingDir', async () => {
@@ -224,6 +233,11 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(result.available).toBe(true);
       expect(result.beadsDir).toBe('/srv/shared/.beads');
       expect(mockAccessPaths[0]).toBe('/srv/shared/.beads');
+
+      mockSpawnArgs = [];
+      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      await plugin.getTasks();
+      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBe('/srv/shared/.beads');
     });
 
     test('resolves a relative configured beadsDir under workingDir', async () => {
@@ -242,6 +256,16 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(result.available).toBe(true);
       expect(result.beadsDir).toBe('/test/shared/.beads');
       expect(mockAccessPaths[0]).toBe('/test/shared/.beads');
+      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBeUndefined();
+    });
+
+    test('does not inject BEADS_DIR for the relative default store', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+
+      await plugin.getTasks();
+
+      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBeUndefined();
     });
 
     test('reports unavailable when bd --version fails', async () => {
