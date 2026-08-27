@@ -33,6 +33,12 @@ function findImportSpecifiers(source: string): string[] {
   return [...specifiers];
 }
 
+function findForbiddenImport(specifier: string): string | undefined {
+  return [...FORBIDDEN_IMPORTS].find(
+    (forbidden) => specifier === forbidden || specifier.startsWith(`${forbidden}/`)
+  );
+}
+
 async function resolveSourceModule(
   importer: string,
   specifier: string
@@ -76,7 +82,7 @@ async function findForbiddenImports(): Promise<string[]> {
     const source = await readFile(modulePath, 'utf8');
     for (const specifier of findImportSpecifiers(source)) {
       const nextChain = [...chain, `${modulePath} -> ${specifier}`];
-      if (FORBIDDEN_IMPORTS.has(specifier)) {
+      if (findForbiddenImport(specifier)) {
         offenders.push(
           `Forbidden import "${specifier}" from ${modulePath}\nImport chain:\n${nextChain.join('\n')}`
         );
@@ -97,6 +103,10 @@ async function findForbiddenImports(): Promise<string[]> {
 describe('ralph-tui/plugin entry point', () => {
   test('finds forbidden dynamic imports in source text', () => {
     expect(findImportSpecifiers("await import('@opentui/core');")).toContain('@opentui/core');
+  });
+
+  test('finds forbidden import subpaths in source text', () => {
+    expect(findForbiddenImport('react/jsx-runtime')).toBe('react');
   });
 
   test('does not reach OpenTUI or React through relative imports', async () => {

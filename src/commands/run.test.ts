@@ -297,6 +297,7 @@ describe('initializeAndReportPluginLoadFailures', () => {
     expect(warnings).toEqual([
       ['  ⚠ Failed to load plugin broken-agent.ts: import exploded'],
       ['  ⚠ Failed to load plugin broken-tracker.ts: import exploded'],
+      ['  ⚠ Failed to load plugin: unknown error'],
     ]);
   });
 });
