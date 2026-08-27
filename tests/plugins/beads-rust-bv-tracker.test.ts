@@ -354,6 +354,118 @@ describe('BeadsRustBvTrackerPlugin', () => {
             expect(result).toEqual(brTask);
         });
 
+        test('uses the configured epic from setEpicId when no parent filter is provided', async () => {
+            const plugin = makePlugin(true);
+            const brTask: TrackerTask = {
+                id: 'epic-child',
+                title: 'Epic child',
+                status: 'open',
+                priority: 2,
+            };
+            const wrongTask: TrackerTask = {
+                id: 'outside-task',
+                title: 'Wrong task',
+                status: 'open',
+                priority: 2,
+                parentId: 'other-epic',
+            };
+            const state = plugin as unknown as {
+                delegate: {
+                    getTask: (id: string) => Promise<TrackerTask | undefined>;
+                    getNextTask: () => Promise<TrackerTask>;
+                };
+            };
+            state.delegate.getTask = async () => wrongTask;
+            state.delegate.getNextTask = async () => brTask;
+            plugin.setEpicId('my-epic');
+            queueRobotNextTask('outside-task');
+
+            const result = await plugin.getNextTask();
+
+            expect(result).toEqual(brTask);
+        });
+
+        test('returns an in-epic bv pick with metadata when no parent filter is provided', async () => {
+            const plugin = makePlugin(true);
+            const task: TrackerTask = {
+                id: 'epic-child',
+                title: 'Epic child',
+                status: 'open',
+                priority: 2,
+                parentId: 'my-epic',
+            };
+            const state = plugin as unknown as {
+                delegate: {
+                    getTask: (id: string) => Promise<TrackerTask | undefined>;
+                };
+            };
+            state.delegate.getTask = async () => task;
+            plugin.setEpicId('my-epic');
+            queueRobotNextTask('epic-child');
+
+            const result = await plugin.getNextTask();
+
+            expect(result?.id).toBe('epic-child');
+            expect(result?.metadata?.bvScore).toBe(0.9);
+            expect(result?.metadata?.bvReasons).toEqual(['Top rank']);
+            expect(result?.metadata?.bvUnblocks).toBe(5);
+        });
+
+        test('uses the configured epic from initialize when no parent filter is provided', async () => {
+            const plugin = new BeadsRustBvTrackerPlugin();
+            const state = plugin as unknown as {
+                delegate: {
+                    initialize: (config: Record<string, unknown>) => Promise<void>;
+                    detect: () => Promise<{ available: boolean; brVersion: string }>;
+                    getTask: (id: string) => Promise<TrackerTask | undefined>;
+                };
+            };
+            state.delegate.initialize = async () => { };
+            state.delegate.detect = async () => ({
+                available: true,
+                brVersion: '1.0.0',
+            });
+            await plugin.initialize({
+                workingDir: '/tmp/project',
+                epicId: 'my-epic',
+            });
+            state.delegate.getTask = async () => ({
+                id: 'epic-child',
+                title: 'Epic child',
+                status: 'open',
+                priority: 2,
+                parentId: 'my-epic',
+            });
+            queueRobotNextTask('epic-child');
+
+            const result = await plugin.getNextTask();
+
+            expect(result?.id).toBe('epic-child');
+            expect(result?.metadata?.bvScore).toBe(0.9);
+        });
+
+        test('passes through a bv pick when no epic is configured', async () => {
+            const plugin = makePlugin(true);
+            const task: TrackerTask = {
+                id: 'unscoped-task',
+                title: 'Unscoped task',
+                status: 'open',
+                priority: 2,
+            };
+            const state = plugin as unknown as {
+                delegate: {
+                    getTask: (id: string) => Promise<TrackerTask | undefined>;
+                };
+            };
+            state.delegate.getTask = async () => task;
+            queueRobotNextTask('unscoped-task');
+
+            const result = await plugin.getNextTask();
+
+            expect(result?.id).toBe('unscoped-task');
+            expect(result?.metadata?.bvScore).toBe(0.9);
+        });
+
         test('forwards label filter to bv', async () => {
             const plugin = makePlugin(true);
 

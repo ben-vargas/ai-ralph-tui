@@ -180,6 +180,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
     private lastTriageRefreshAt = 0;
     private workingDir: string = process.cwd();
     private labels: string[] = [];
+    private epicId: string = '';
     private labelScopeWarningShown = false;
 
     constructor() {
@@ -193,6 +194,9 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
         // Store working dir and labels for bv invocations.
         if (typeof config.workingDir === 'string') {
             this.workingDir = config.workingDir;
+        }
+        if (typeof config.epicId === 'string') {
+            this.epicId = config.epicId;
         }
         if (typeof config.labels === 'string') {
             this.labels = config.labels
@@ -363,7 +367,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
 
             // Check epic membership: if an epic filter is active, ensure bv's pick
             // belongs to it, otherwise fall back.
-            const epicFilter = filter?.parentId;
+            const epicFilter = filter?.parentId ?? this.epicId;
             if (epicFilter) {
                 const fullTask = await this.delegate.getTask(nextOutput.id);
                 if (
@@ -477,6 +481,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
     }
 
     setEpicId(epicId: string): void {
+        this.epicId = epicId;
         this.delegate.setEpicId(epicId);
     }
 
