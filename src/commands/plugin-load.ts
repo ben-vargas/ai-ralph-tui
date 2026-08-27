@@ -12,7 +12,8 @@ function reportPluginLoadFailures(
 ): void {
   for (const result of results) {
     if (!result.success) {
-      console.warn(`  ⚠ ${result.error ?? 'Failed to load plugin: unknown error'}`);
+      const error = result.error?.trim();
+      console.warn(`  ⚠ ${error || 'Failed to load plugin: unknown error'}`);
     }
   }
 }

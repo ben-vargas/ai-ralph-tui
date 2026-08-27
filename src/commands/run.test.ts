@@ -300,6 +300,25 @@ describe('initializeAndReportPluginLoadFailures', () => {
       ['  ⚠ Failed to load plugin: unknown error'],
     ]);
   });
+
+  test('uses the fallback warning for a blank error', async () => {
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+
+    try {
+      await initializeAndReportPluginLoadFailures(
+        async () => [{ success: false, error: '' }],
+        async () => []
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([['  ⚠ Failed to load plugin: unknown error']]);
+  });
 });
 
 describe('parseRunArgs', () => {
