@@ -187,6 +187,7 @@ describe('BeadsRustTrackerPlugin', () => {
     mockAccessFailPaths = ['/test/.beads'];
     mockSpawnResponses = [
       { exitCode: 0, stdout: 'br version 0.4.1\n' },
+      { exitCode: 0, stdout: JSON.stringify({ issues: [] }) },
       {
         exitCode: 0,
         stdout: JSON.stringify([
@@ -212,6 +213,7 @@ describe('BeadsRustTrackerPlugin', () => {
     mockAccessFailPaths = ['/test/.beads'];
     mockSpawnResponses = [
       { exitCode: 0, stdout: 'br version 0.4.1\n' },
+      { exitCode: 0, stdout: JSON.stringify({ issues: [] }) },
       {
         exitCode: 0,
         stdout: JSON.stringify([

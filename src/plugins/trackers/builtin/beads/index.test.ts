@@ -175,6 +175,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       mockAccessFailPaths = ['/test/.beads'];
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify([
@@ -200,6 +201,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       mockAccessFailPaths = ['/test/.beads'];
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify([
