@@ -24,6 +24,16 @@ import {
   type SessionRegistryEntry,
 } from './registry.js';
 
+async function expectPathMissing(path: string): Promise<void> {
+  let exists = true;
+  try {
+    await access(path);
+  } catch {
+    exists = false;
+  }
+  expect(exists).toBe(false);
+}
+
 describe('Session Registry', () => {
   let testSessionIds: string[] = [];
   let originalConfigDir: string | undefined;
@@ -93,6 +103,48 @@ describe('Session Registry', () => {
       expect(retrieved?.status).toBe('running');
       expect(retrieved?.epicId).toBe('ui-epic');
       expect(retrieved?.epicIds).toEqual(['ui-epic', 'backend-epic']);
+    });
+
+    test('pins the registry directory across a mutation', async () => {
+      const registryDirA = testRegistryDir!;
+      const registryDirB = await mkdtemp(join(tmpdir(), 'ralph-tui-registry-switch-'));
+      const sessionId = `test-session-${Date.now()}-pinned`;
+      testSessionIds.push(sessionId);
+      let switched = false;
+
+      const entry = {
+        sessionId,
+        cwd: '/tmp/pinned-project',
+        status: 'running' as const,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        agentPlugin: 'claude',
+        trackerPlugin: 'json',
+      } as SessionRegistryEntry;
+      Object.defineProperty(entry, 'sessionId', {
+        get: () => {
+          if (!switched) {
+            switched = true;
+            process.env.RALPH_TUI_CONFIG_DIR = registryDirB;
+          }
+          return sessionId;
+        },
+      });
+
+      try {
+        await registerSession(entry);
+
+        const registryInA = JSON.parse(
+          await readFile(join(registryDirA, 'sessions.json'), 'utf-8')
+        ) as { sessions: Record<string, SessionRegistryEntry> };
+        expect(registryInA.sessions[sessionId]).toBeDefined();
+        await expectPathMissing(join(registryDirA, 'sessions.lock'));
+        await expectPathMissing(join(registryDirB, 'sessions.json'));
+        await expectPathMissing(join(registryDirB, 'sessions.lock'));
+      } finally {
+        process.env.RALPH_TUI_CONFIG_DIR = registryDirA;
+        await rm(registryDirB, { recursive: true, force: true });
+      }
     });
 
     test('updates existing session on re-register', async () => {
