@@ -101,7 +101,7 @@ beadsDir = ".beads"
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `beadsDir` | string | `.beads` | Path to .beads directory |
+| `beadsDir` | string | `.beads` | Path to .beads directory, relative to `workingDir` unless absolute |
 | `epicId` | string | - | Epic ID to filter tasks (set via `--epic` flag) |
 | `labels` | string | (empty) | Optional comma-separated label filter |
 | `workingDir` | string | `.` | Working directory for br commands |
@@ -109,6 +109,10 @@ beadsDir = ".beads"
 <Callout type="info">
 The `epicId` should be set via `--epic` flag rather than config, since you'll likely work on different epics.
 </Callout>
+
+The Beads-Rust store can live outside the working directory. Set `BEADS_DIR`
+to the store path, or use an absolute `beadsDir` path. This supports shared or
+remote tracker setups, such as a Dolt-server-backed Beads store.
 
 ## Multi-Epic Parallel Execution
 
@@ -269,6 +273,9 @@ Initialize Beads in your project:
 ```bash
 br init
 ```
+
+If the store is outside the working directory, verify that `BEADS_DIR` points
+to it or that `beadsDir` is configured with its absolute path.
 
 ### "No tasks available"
 

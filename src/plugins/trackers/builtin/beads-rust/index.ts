@@ -76,6 +76,30 @@ interface BrDepListItem {
   priority: number;
 }
 
+function resolveBeadsDir(
+  workingDir: string,
+  configuredBeadsDir: string
+): { path: string; source: string } {
+  if (isAbsolute(configuredBeadsDir)) {
+    return { path: configuredBeadsDir, source: 'configured beadsDir' };
+  }
+
+  const environmentBeadsDir = process.env.BEADS_DIR?.trim();
+  if (environmentBeadsDir) {
+    return {
+      path: isAbsolute(environmentBeadsDir)
+        ? environmentBeadsDir
+        : resolve(workingDir, environmentBeadsDir),
+      source: 'BEADS_DIR',
+    };
+  }
+
+  return {
+    path: join(workingDir, configuredBeadsDir),
+    source: 'workingDir and beadsDir',
+  };
+}
+
 /**
  * Result of detect() operation.
  */
@@ -327,14 +351,14 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     const beadsDir =
       typeof this.config.beadsDir === 'string' ? this.config.beadsDir : '.beads';
 
-    // Check for .beads directory
-    const beadsDirPath = join(workingDir, beadsDir);
+    const beadsDirResolution = resolveBeadsDir(workingDir, beadsDir);
+    const beadsDirPath = beadsDirResolution.path;
     try {
       await access(beadsDirPath, constants.R_OK);
     } catch {
       return {
         available: false,
-        error: `Beads directory not found: ${beadsDirPath}`,
+        error: `Beads directory not found: ${beadsDirPath} (resolved from ${beadsDirResolution.source})`,
       };
     }
 

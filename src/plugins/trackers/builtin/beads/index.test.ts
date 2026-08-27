@@ -7,10 +7,13 @@
  * beforeAll before the module under test is dynamically imported.
  */
 
-import { describe, test, expect, mock, beforeEach, beforeAll, afterAll } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, beforeAll, afterAll, afterEach } from 'bun:test';
 import { EventEmitter } from 'node:events';
 
 let mockAccessShouldFail = false;
+let mockAccessFailPaths: string[] = [];
+let mockAccessPaths: string[] = [];
+const originalBeadsDir = process.env.BEADS_DIR;
 
 let mockSpawnArgs: Array<{ cmd: string; args: string[] }> = [];
 
@@ -82,8 +85,9 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     mock.module('node:fs', () => ({
       constants: { R_OK: 4 },
-      access: (_path: string, _mode: number, cb: (err: Error | null) => void) => {
-        if (mockAccessShouldFail) {
+      access: (path: string, _mode: number, cb: (err: Error | null) => void) => {
+        mockAccessPaths.push(path);
+        if (mockAccessShouldFail || mockAccessFailPaths.includes(path)) {
           cb(new Error('ENOENT'));
         } else {
           cb(null);
@@ -92,8 +96,9 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
     }));
 
     mock.module('node:fs/promises', () => ({
-      access: async () => {
-        if (mockAccessShouldFail) {
+      access: async (path: string) => {
+        mockAccessPaths.push(path);
+        if (mockAccessShouldFail || mockAccessFailPaths.includes(path)) {
           throw new Error('ENOENT');
         }
       },
@@ -112,16 +117,31 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
   });
 
   afterAll(() => {
+    if (originalBeadsDir === undefined) {
+      delete process.env.BEADS_DIR;
+    } else {
+      process.env.BEADS_DIR = originalBeadsDir;
+    }
     mock.restore();
   });
 
   beforeEach(() => {
     mockAccessShouldFail = false;
+    mockAccessFailPaths = [];
+    mockAccessPaths = [];
     mockSpawnArgs = [];
     mockSpawnResponses = [];
     mockReadFileShouldFail = false;
     mockReadFileContent = '';
     mockReadFilePaths = [];
+  });
+
+  afterEach(() => {
+    if (originalBeadsDir === undefined) {
+      delete process.env.BEADS_DIR;
+    } else {
+      process.env.BEADS_DIR = originalBeadsDir;
+    }
   });
 
   // ── Detection ──────────────────────────────────────────────────────
@@ -138,6 +158,78 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(result.error).toContain('Beads directory not found');
       // Should not attempt bd --version since dir check failed first
       expect(mockSpawnArgs.length).toBe(0);
+
+      const originalError = console.error;
+      const errorMessages: string[] = [];
+      console.error = (...args: unknown[]) => {
+        errorMessages.push(args.map((arg) => String(arg)).join(' '));
+      };
+      try {
+        expect(await plugin.getNextTask()).toBeUndefined();
+      } finally {
+        console.error = originalError;
+      }
+      expect(errorMessages.join('\n')).toContain('Beads tracker detection failed');
+    });
+
+    test('uses BEADS_DIR when no local .beads directory exists', async () => {
+      process.env.BEADS_DIR = '/shared/project/.beads';
+      mockAccessFailPaths = ['/test/.beads'];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
+          ]),
+        },
+      ];
+
+      const plugin = new BeadsTrackerPlugin();
+      await plugin.initialize({ workingDir: '/test' });
+      mockSpawnArgs = [];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('t1');
+      expect(mockAccessPaths).toContain('/shared/project/.beads');
+      expect(mockAccessPaths).not.toContain('/test/.beads');
+    });
+
+    test('checks an absolute configured beadsDir as-is', async () => {
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+        { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+      ];
+      const plugin = new BeadsTrackerPlugin();
+      await plugin.initialize({
+        workingDir: '/test',
+        beadsDir: '/srv/shared/.beads',
+      });
+
+      const result = await plugin.detect();
+
+      expect(result.available).toBe(true);
+      expect(result.beadsDir).toBe('/srv/shared/.beads');
+      expect(mockAccessPaths[0]).toBe('/srv/shared/.beads');
+    });
+
+    test('resolves a relative configured beadsDir under workingDir', async () => {
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+        { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+      ];
+      const plugin = new BeadsTrackerPlugin();
+      await plugin.initialize({
+        workingDir: '/test',
+        beadsDir: 'shared/.beads',
+      });
+
+      const result = await plugin.detect();
+
+      expect(result.available).toBe(true);
+      expect(result.beadsDir).toBe('/test/shared/.beads');
+      expect(mockAccessPaths[0]).toBe('/test/shared/.beads');
     });
 
     test('reports unavailable when bd --version fails', async () => {

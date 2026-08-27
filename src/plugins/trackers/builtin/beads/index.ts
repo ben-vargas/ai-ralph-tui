@@ -7,7 +7,7 @@
 import { spawn } from 'node:child_process';
 import { access, constants } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
 import { sortDottedChildTaskIds } from '../../task-ordering.js';
 import { BEADS_TEMPLATE } from '../../../../templates/builtin.js';
@@ -78,6 +78,30 @@ interface DetectResult {
   bdPath?: string;
   bdVersion?: string;
   error?: string;
+}
+
+function resolveBeadsDir(
+  workingDir: string,
+  configuredBeadsDir: string
+): { path: string; source: string } {
+  if (isAbsolute(configuredBeadsDir)) {
+    return { path: configuredBeadsDir, source: 'configured beadsDir' };
+  }
+
+  const environmentBeadsDir = process.env.BEADS_DIR?.trim();
+  if (environmentBeadsDir) {
+    return {
+      path: isAbsolute(environmentBeadsDir)
+        ? environmentBeadsDir
+        : resolve(workingDir, environmentBeadsDir),
+      source: 'BEADS_DIR',
+    };
+  }
+
+  return {
+    path: join(workingDir, configuredBeadsDir),
+    source: 'workingDir and beadsDir',
+  };
 }
 
 
@@ -237,6 +261,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   private epicId: string = '';
   protected labels: string[] = [];
   private workingDir: string = process.cwd();
+  private detectionError: string | undefined;
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
@@ -266,6 +291,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // Validate readiness
     const detection = await this.detect();
     this.ready = detection.available;
+    this.detectionError = detection.error;
   }
 
   /**
@@ -273,8 +299,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
    * Checks for .beads/ directory and bd binary.
    */
   async detect(): Promise<DetectResult> {
-    // Check for .beads directory
-    const beadsDirPath = join(this.workingDir, this.beadsDir);
+    const beadsDir = resolveBeadsDir(this.workingDir, this.beadsDir);
+    const beadsDirPath = beadsDir.path;
     try {
       await new Promise<void>((resolve, reject) => {
         access(beadsDirPath, constants.R_OK, (err) => {
@@ -285,7 +311,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     } catch {
       return {
         available: false,
-        error: `Beads directory not found: ${beadsDirPath}`,
+        error: `Beads directory not found: ${beadsDirPath} (resolved from ${beadsDir.source})`,
       };
     }
 
@@ -318,6 +344,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     if (!this.ready) {
       const detection = await this.detect();
       this.ready = detection.available;
+      this.detectionError = detection.error;
     }
     return this.ready;
   }
@@ -668,6 +695,10 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   override async getNextTask(filter?: TaskFilter): Promise<TrackerTask | undefined> {
     // Check if plugin is ready before making CLI calls
     if (!(await this.isReady())) {
+      console.error(
+        'Beads tracker detection failed:',
+        this.detectionError ?? 'unknown error'
+      );
       return undefined;
     }
 
