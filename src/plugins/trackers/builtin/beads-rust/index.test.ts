@@ -1185,6 +1185,32 @@ describe('BeadsRustTrackerPlugin', () => {
       expect(mockSpawnArgs[0]?.args).toContain('ready');
     });
 
+    test('does not resume in_progress epics as tasks', async () => {
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'br version 0.4.1\n' },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'epic', title: 'In progress epic', issue_type: 'epic', status: 'in_progress', priority: 0 },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'task', title: 'Open task', issue_type: 'task', status: 'open', priority: 1 },
+          ]),
+        },
+      ];
+
+      const plugin = new BeadsRustTrackerPlugin();
+      await plugin.initialize({ workingDir: '/test' });
+      mockSpawnArgs = [];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('task');
+    });
+
     test('excludes tasks listed in excludeIds', async () => {
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'br version 0.4.1\n' },

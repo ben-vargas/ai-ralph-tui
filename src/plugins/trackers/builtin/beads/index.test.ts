@@ -997,6 +997,28 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(mockSpawnArgs[0]?.args).toContain('ready');
     });
 
+    test('does not resume in_progress epics as tasks', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'epic', title: 'In progress epic', issue_type: 'epic', status: 'in_progress', priority: 0 },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'task', title: 'Open task', issue_type: 'task', status: 'open', priority: 1 },
+          ]),
+        },
+      ];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('task');
+    });
+
     test('excludes task IDs from excludeIds filter', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [

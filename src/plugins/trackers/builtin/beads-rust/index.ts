@@ -632,10 +632,14 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     if (statuses.includes('in_progress')) {
       // br ready only returns unblocked open work, so look up already-started
       // tasks separately to ensure interrupted work can be resumed.
-      const started = await this.getTasks({
+      const requestedTypes = filter?.type
+        ? (Array.isArray(filter.type) ? filter.type : [filter.type])
+        : [];
+      const allowsEpics = requestedTypes.includes('epic');
+      const started = (await this.getTasks({
         ...filter,
         status: ['in_progress'],
-      });
+      })).filter((task) => allowsEpics || task.type !== 'epic');
       if (started.length > 0) {
         return started.reduce((selected, task) =>
           task.priority < selected.priority ? task : selected
