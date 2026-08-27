@@ -992,6 +992,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
     test('unwraps an envelope from bd ready output', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify({
