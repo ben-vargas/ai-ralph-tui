@@ -447,7 +447,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
         {
-          exitCode: 1,
+          exitCode: 0,
           stdout: JSON.stringify({
             schema_version: 1,
             data: { error: 'list failed', code: 'LIST_ERROR' },
@@ -455,9 +455,22 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
         },
       ];
 
-      const tasks = await plugin.getTasks();
+      const originalError = console.error;
+      const errors: unknown[][] = [];
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+
+      let tasks: Awaited<ReturnType<typeof plugin.getTasks>>;
+      try {
+        tasks = await plugin.getTasks();
+      } finally {
+        console.error = originalError;
+      }
 
       expect(tasks).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0]?.[1])).toContain('list failed');
     });
 
     test('maps bd statuses to TrackerTaskStatus correctly', async () => {
