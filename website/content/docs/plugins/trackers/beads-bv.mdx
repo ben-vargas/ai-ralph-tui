@@ -126,6 +126,13 @@ Same as the base Beads tracker:
 See the [Beads Tracker docs](/docs/plugins/trackers/beads#label-filtering-optional) for details on label filtering.
 </Callout>
 
+<Callout type="info">
+`bv`'s robot flags do not apply label scoping to `--robot-next`. Ralph therefore
+verifies each `bv` pick against the configured labels and falls back to `bd`'s
+native label filtering when it does not match. Epic scoping remains the primary
+mechanism for narrowing smart selections.
+</Callout>
+
 ## Multi-Epic Parallel Execution
 
 Beads-BV can participate in multi-epic parallel orchestration the same way as the base Beads tracker:

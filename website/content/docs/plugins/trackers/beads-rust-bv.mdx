@@ -145,6 +145,11 @@ getNextTask()
 
 After each `completeTask()` or `updateTaskStatus()` call, a background `bv --robot-triage` refresh is triggered (debounced to 30 seconds) so future `getTasks()` calls can display bv scores alongside every task.
 
+`bv`'s robot flags do not apply label scoping to `--robot-next`. Ralph therefore
+verifies each pick against the configured labels and falls back to `br`'s native
+label filtering when it does not match. Epic scoping remains the primary
+mechanism for narrowing smart selections.
+
 ## Fallback Behaviour
 
 If `bv` is not installed or is not on your `PATH`, the plugin automatically falls back to `br ready` for task selection (identical to using the plain `beads-rust` tracker). No configuration change is required — the plugin detects `bv` availability on startup and adjusts accordingly.
