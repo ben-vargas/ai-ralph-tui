@@ -466,6 +466,26 @@ describe('BeadsBvTrackerPlugin', () => {
   });
 
   describe('getTasks ordering', () => {
+    test('unwraps an envelope from bd epic children output', async () => {
+      const plugin = new BeadsBvTrackerPlugin();
+
+      queueSpawnResponse({
+        command: 'bd',
+        stdout: JSON.stringify({
+          schema_version: 1,
+          data: [{ id: 'task-1' }, { id: 'task-2' }],
+        }),
+      });
+
+      const children = await (
+        plugin as unknown as {
+          getEpicChildrenIds: (epicId: string) => Promise<string[]>;
+        }
+      ).getEpicChildrenIds('epic-1');
+
+      expect(children).toEqual(['task-1', 'task-2']);
+    });
+
     test('applies shared dotted child numeric ordering through parent beads tracker', async () => {
       const plugin = new BeadsBvTrackerPlugin();
 

@@ -9,6 +9,7 @@ import { access, constants } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
+import { parseBeadsJsonArray } from '../../beads-json.js';
 import { sortDottedChildTaskIds } from '../../task-ordering.js';
 import { BEADS_TEMPLATE } from '../../../../templates/builtin.js';
 import type {
@@ -402,7 +403,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // Parse JSON output
     let beads: BeadJson[];
     try {
-      beads = JSON.parse(stdout) as BeadJson[];
+      beads = parseBeadsJsonArray<BeadJson>(stdout);
     } catch (err) {
       console.error('Failed to parse bd list output:', err);
       return [];
@@ -474,7 +475,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     }
 
     try {
-      const deps = JSON.parse(stdout) as BdDepListItem[];
+      const deps = parseBeadsJsonArray<BdDepListItem>(stdout);
       const dependsOn: string[] = [];
 
       for (const dep of deps) {
@@ -519,7 +520,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // bd show --json returns an array with one element
     let beads: BeadJson[];
     try {
-      beads = JSON.parse(stdout) as BeadJson[];
+      beads = parseBeadsJsonArray<BeadJson>(stdout);
     } catch (err) {
       console.error('Failed to parse bd show output:', err);
       return undefined;
@@ -643,7 +644,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // Parse JSON output
     let beads: BeadJson[];
     try {
-      beads = JSON.parse(stdout) as BeadJson[];
+      beads = parseBeadsJsonArray<BeadJson>(stdout);
     } catch (err) {
       console.error('Failed to parse bd list output:', err);
       return [];
@@ -716,7 +717,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
     // Parse JSON output
     let beads: BeadJson[];
     try {
-      beads = JSON.parse(stdout) as BeadJson[];
+      beads = parseBeadsJsonArray<BeadJson>(stdout);
     } catch (err) {
       console.error('Failed to parse bd ready output:', err);
       return undefined;
@@ -806,7 +807,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       }
 
       // bd show --json returns an array with one element
-      const epics = JSON.parse(epicResult.stdout) as BeadJson[];
+      const epics = parseBeadsJsonArray<BeadJson>(epicResult.stdout);
       if (epics.length === 0) {
         return null;
       }
@@ -836,7 +837,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       let totalCount = 0;
 
       if (childrenResult.exitCode === 0) {
-        const children = JSON.parse(childrenResult.stdout) as BeadJson[];
+        const children = parseBeadsJsonArray<BeadJson>(childrenResult.stdout);
         totalCount = children.length;
         completedCount = children.filter(
           (c) => c.status === 'closed' || c.status === 'cancelled'
