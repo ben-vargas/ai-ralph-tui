@@ -693,6 +693,8 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       }
     }
 
+    // bd ready only returns open work, so it cannot answer a request that
+    // excludes open tasks.
     if (!statuses.includes('open')) {
       return undefined;
     }
