@@ -10,6 +10,7 @@ import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { BeadsTrackerPlugin } from '../beads/index.js';
+import { parseBeadsJsonArray } from '../../beads-json.js';
 import { BEADS_BV_TEMPLATE } from '../../../../templates/builtin.js';
 import type {
   TrackerPluginMeta,
@@ -721,7 +722,7 @@ export class BeadsBvTrackerPlugin extends BeadsTrackerPlugin {
     }
 
     try {
-      const beads = JSON.parse(stdout) as Array<{ id: string }>;
+      const beads = parseBeadsJsonArray<{ id: string }>(stdout);
       return beads.map((b) => b.id);
     } catch {
       return [];

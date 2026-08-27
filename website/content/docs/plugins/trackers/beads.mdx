@@ -114,6 +114,13 @@ The Beads store can live outside the working directory. Set `BEADS_DIR` to
 the store path, or use an absolute `beadsDir` path. This supports shared or
 remote tracker setups, such as a Dolt-server-backed Beads store.
 
+### JSON Output Compatibility
+
+The Beads tracker reads both legacy `bd --json` payloads and the
+`BD_JSON_ENVELOPE=1` format, which wraps payloads in `{ schema_version, data }`.
+The envelope is also the default in bd v2.0, so no tracker configuration is
+needed for either format.
+
 ## Multi-Epic Parallel Execution
 
 The Beads tracker supports multi-epic parallel runs when tasks are organized as children of epics:
