@@ -671,6 +671,24 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       return undefined;
     }
 
+    const statuses = filter?.status
+      ? (Array.isArray(filter.status) ? filter.status : [filter.status])
+      : ['open', 'in_progress'];
+
+    if (statuses.includes('in_progress')) {
+      // bd ready only returns unblocked open work, so look up already-started
+      // tasks separately to ensure interrupted work can be resumed.
+      const started = await this.getTasks({
+        ...filter,
+        status: ['in_progress'],
+      });
+      if (started.length > 0) {
+        return started.reduce((selected, task) =>
+          task.priority < selected.priority ? task : selected
+        );
+      }
+    }
+
     // Build bd ready command args
     const args = ['ready', '--json'];
 

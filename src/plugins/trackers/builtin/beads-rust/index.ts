@@ -625,6 +625,24 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
    * dependency information for client-side readiness filtering.
    */
   override async getNextTask(filter?: TaskFilter): Promise<TrackerTask | undefined> {
+    const statuses = filter?.status
+      ? (Array.isArray(filter.status) ? filter.status : [filter.status])
+      : ['open', 'in_progress'];
+
+    if (statuses.includes('in_progress')) {
+      // br ready only returns unblocked open work, so look up already-started
+      // tasks separately to ensure interrupted work can be resumed.
+      const started = await this.getTasks({
+        ...filter,
+        status: ['in_progress'],
+      });
+      if (started.length > 0) {
+        return started.reduce((selected, task) =>
+          task.priority < selected.priority ? task : selected
+        );
+      }
+    }
+
     const args = ['ready', '--json'];
 
     // We only need one task, but fetch a small batch so we can prefer

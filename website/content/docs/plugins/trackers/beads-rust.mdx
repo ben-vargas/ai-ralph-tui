@@ -26,6 +26,10 @@ This creates a `.beads/` directory with your issue tracker (SQLite database + JS
 
 ## Basic Usage
 
+Task selection prefers an already-`in_progress` task within the configured
+scope, so an interrupted task is resumed rather than stranded. This is
+necessary because `br ready` only returns unblocked open work.
+
 <Steps>
   <Step title="Create an Epic">
     Epics group related tasks:
