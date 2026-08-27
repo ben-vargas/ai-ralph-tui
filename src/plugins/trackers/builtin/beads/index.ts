@@ -841,11 +841,11 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
 
     try {
       // Get epic to find external_ref with PRD link
-    const epicResult = await execBd(
-      ['show', epicId, '--json'],
-      this.workingDir,
-      this.getCommandEnv()
-    );
+      const epicResult = await execBd(
+        ['show', epicId, '--json'],
+        this.workingDir,
+        this.getCommandEnv()
+      );
       if (epicResult.exitCode !== 0) {
         return null;
       }
