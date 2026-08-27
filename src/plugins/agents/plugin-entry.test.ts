@@ -11,7 +11,7 @@ const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 const PLUGIN_ENTRY = resolve(REPOSITORY_ROOT, 'src/plugin.ts');
 const FORBIDDEN_IMPORTS = new Set(['@opentui/core', '@opentui/react', 'react']);
 
-export function findImportSpecifiers(source: string): string[] {
+function findImportSpecifiers(source: string): string[] {
   const specifiers = new Set<string>();
   const fromPattern = /\b(?:import|export)\s+(?:type\s+)?[\s\S]*?\sfrom\s+['"]([^'"]+)['"]/g;
   const sideEffectPattern = /\bimport\s*['"]([^'"]+)['"]/g;
