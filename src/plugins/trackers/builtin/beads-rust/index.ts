@@ -732,7 +732,7 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     );
 
     if (exitCode !== 0) {
-      console.error('br ready failed:', this.detectionError ?? stderr);
+      console.error('br ready failed:', stderr || (this.detectionError ?? ''));
       return undefined;
     }
 
