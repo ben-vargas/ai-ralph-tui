@@ -693,6 +693,10 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
       }
     }
 
+    if (!statuses.includes('open')) {
+      return undefined;
+    }
+
     // Build bd ready command args
     const args = ['ready', '--json'];
 

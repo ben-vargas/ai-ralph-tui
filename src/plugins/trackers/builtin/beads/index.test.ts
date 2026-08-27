@@ -997,6 +997,17 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(mockSpawnArgs[0]?.args).toContain('ready');
     });
 
+    test('returns undefined for an in_progress-only filter without ready work', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+
+      const task = await plugin.getNextTask({ status: ['in_progress'] });
+
+      expect(task).toBeUndefined();
+      expect(mockSpawnArgs).toHaveLength(1);
+      expect(mockSpawnArgs[0]?.args).not.toContain('ready');
+    });
+
     test('does not resume in_progress epics as tasks', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [

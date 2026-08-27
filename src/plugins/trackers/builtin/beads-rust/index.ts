@@ -647,6 +647,10 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       }
     }
 
+    if (!statuses.includes('open')) {
+      return undefined;
+    }
+
     const args = ['ready', '--json'];
 
     // We only need one task, but fetch a small batch so we can prefer
