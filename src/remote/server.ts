@@ -979,10 +979,10 @@ export class RemoteServer {
     }
 
     const engine = this.options.engine;
-    const activeTaskId = engine.getState().currentTask?.id;
 
     // stop() interrupts the current execution and emits engine:stopped with reason: 'interrupted'
     engine.stop().then(async () => {
+      const activeTaskId = engine.getState().currentTask?.id;
       if (activeTaskId) {
         await engine.resetTasksToOpen([activeTaskId]);
       }

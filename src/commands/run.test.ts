@@ -4,7 +4,7 @@
  * parallel/sequential run summary helpers, and WorktreeInfo-backed summary mocks.
  */
 
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, mock } from 'bun:test';
 import {
   filterTasksByRange,
   parseRunArgs,
@@ -20,6 +20,7 @@ import {
   createSequentialRunSummary,
   formatSequentialRunSummary,
   resolveExecutionScopes,
+  stopAndResetHeadlessTasks,
   type TaskRangeFilter,
   type ParallelConflictState,
 } from './run.js';
@@ -262,6 +263,39 @@ describe('resolveExecutionScopes', () => {
     } finally {
       console.error = originalError;
     }
+  });
+});
+
+describe('stopAndResetHeadlessTasks', () => {
+  test('reads active tasks after the engine has drained', async () => {
+    let state = {
+      activeTaskIds: ['task-before-stop'],
+    } as PersistedSessionState;
+    const stop = mock(async () => {
+      state = {
+        ...state,
+        activeTaskIds: ['task-before-stop', 'task-during-stop'],
+      };
+    });
+    const resetTasksToOpen = mock(async (taskIds: string[]) => taskIds.length);
+    const headlessEvents = {
+      getState: () => state,
+      setState: (next: PersistedSessionState): void => {
+        state = next;
+      },
+    };
+
+    await stopAndResetHeadlessTasks(
+      { stop, resetTasksToOpen },
+      headlessEvents
+    );
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(resetTasksToOpen).toHaveBeenCalledWith([
+      'task-before-stop',
+      'task-during-stop',
+    ]);
+    expect(state.activeTaskIds).toEqual([]);
   });
 });
 

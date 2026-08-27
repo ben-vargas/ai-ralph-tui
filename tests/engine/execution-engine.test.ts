@@ -300,6 +300,66 @@ describe('ExecutionEngine', () => {
     });
 
     describe('running → stopping → idle transition', () => {
+      test('drains the active iteration before allowing task reset', async () => {
+        engine = new ExecutionEngine(config);
+        engine.on((event) => events.push(event));
+
+        const task = createTrackerTask({ id: 'task-drain' });
+        const statuses: string[] = [];
+        let releaseInProgress!: () => void;
+        const inProgressUpdate = new Promise<void>((resolve) => {
+          releaseInProgress = resolve;
+        });
+
+        (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve([task])
+        );
+        (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve(false)
+        );
+        (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve(task)
+        );
+        (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(
+          async (_taskId: string, status: string) => {
+            statuses.push(status);
+            if (status === 'in_progress') {
+              await inProgressUpdate;
+            }
+          }
+        );
+
+        await engine.initialize();
+        const startPromise = engine.start();
+        await new Promise<void>((resolve) => {
+          const check = (): void => {
+            if (statuses.includes('in_progress')) {
+              resolve();
+            } else {
+              setTimeout(check, 0);
+            }
+          };
+          check();
+        });
+
+        const firstStop = engine.stop();
+        const secondStop = engine.stop();
+        expect(statuses).toEqual(['in_progress']);
+
+        releaseInProgress();
+        await Promise.all([firstStop, secondStop]);
+        await engine.resetTasksToOpen([task.id]);
+        await startPromise;
+
+        expect(statuses.at(-1)).toBe('open');
+        expect(
+          events.filter((event) => event.type === 'engine:stopped')
+        ).toHaveLength(1);
+        (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve(undefined as TrackerTask | undefined)
+        );
+      });
+
       test('stop transitions through stopping to idle', async () => {
         engine = new ExecutionEngine(config);
 

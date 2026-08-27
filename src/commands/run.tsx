@@ -76,7 +76,7 @@ import { projectConfigExists, runSetupWizard, checkAndMigrate } from '../setup/i
 import { createInterruptHandler } from '../interruption/index.js';
 import type { InterruptHandler } from '../interruption/types.js';
 import { createStructuredLogger, clearProgress } from '../logs/index.js';
-import { createHeadlessEventHandler } from './headless-events.js';
+import { createHeadlessEventHandler, type HeadlessEventHandler } from './headless-events.js';
 import { sendCompletionNotification, sendMaxIterationsNotification, sendErrorNotification, resolveNotificationsEnabled } from '../notifications.js';
 import type { NotificationSoundMode } from '../config/types.js';
 import { detectSandboxMode } from '../sandbox/index.js';
@@ -3172,6 +3172,25 @@ interface HeadlessOptions {
   remoteServer?: RemoteServer | null;
 }
 
+export async function stopAndResetHeadlessTasks(
+  engine: Pick<ExecutionEngine, 'stop' | 'resetTasksToOpen'>,
+  headlessEvents: Pick<HeadlessEventHandler, 'getState' | 'setState'>,
+  onReset: (count: number) => void = () => {}
+): Promise<void> {
+  await engine.stop();
+
+  const activeTasks = getActiveTasks(headlessEvents.getState());
+  if (activeTasks.length === 0) {
+    return;
+  }
+
+  onReset(activeTasks.length);
+  const resetCount = await engine.resetTasksToOpen(activeTasks);
+  if (resetCount > 0) {
+    headlessEvents.setState(clearActiveTasks(headlessEvents.getState()));
+  }
+}
+
 async function runHeadless(
   engine: ExecutionEngine,
   persistedState: PersistedSessionState,
@@ -3259,15 +3278,9 @@ async function runHeadless(
     logger.info('system', 'Interrupted, stopping gracefully...');
     logger.info('system', '(Press Ctrl+C again within 1s to force quit)');
 
-    // Reset any active (in_progress) tasks back to open
-    const activeTasks = getActiveTasks(headlessEvents.getState());
-    if (activeTasks.length > 0) {
-      logger.info('system', `Resetting ${activeTasks.length} in_progress task(s) to open...`);
-      const resetCount = await engine.resetTasksToOpen(activeTasks);
-      if (resetCount > 0) {
-        headlessEvents.setState(clearActiveTasks(headlessEvents.getState()));
-      }
-    }
+    await stopAndResetHeadlessTasks(engine, headlessEvents, (count) => {
+      logger.info('system', `Resetting ${count} in_progress task(s) to open...`);
+    });
 
     // Save interrupted state
     headlessEvents.setState({ ...headlessEvents.getState(), status: 'interrupted' });
@@ -3302,15 +3315,9 @@ async function runHeadless(
   const handleSigterm = async (): Promise<void> => {
     logger.info('system', 'Received SIGTERM, stopping gracefully...');
 
-    // Reset any active (in_progress) tasks back to open
-    const activeTasks = getActiveTasks(headlessEvents.getState());
-    if (activeTasks.length > 0) {
-      logger.info('system', `Resetting ${activeTasks.length} in_progress task(s) to open...`);
-      const resetCount = await engine.resetTasksToOpen(activeTasks);
-      if (resetCount > 0) {
-        headlessEvents.setState(clearActiveTasks(headlessEvents.getState()));
-      }
-    }
+    await stopAndResetHeadlessTasks(engine, headlessEvents, (count) => {
+      logger.info('system', `Resetting ${count} in_progress task(s) to open...`);
+    });
 
     headlessEvents.setState({ ...headlessEvents.getState(), status: 'interrupted' });
     await savePersistedSession(headlessEvents.getState());
