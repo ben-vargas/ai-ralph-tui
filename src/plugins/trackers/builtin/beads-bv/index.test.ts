@@ -38,6 +38,24 @@ function queueSpawnResponse(response: MockSpawnResponse): void {
   spawnResponses.push(response);
 }
 
+function queueRobotNextTask(id = 'task-42'): void {
+  queueSpawnResponse({
+    command: 'bv',
+    stdout: JSON.stringify({
+      generated_at: '2026-02-24T00:00:00.000Z',
+      data_hash: 'hash',
+      output_format: 'json',
+      id,
+      title: 'Robot next task',
+      score: 0.9,
+      reasons: ['Top rank'],
+      unblocks: 5,
+      claim_command: `bd update ${id} --status in_progress`,
+      show_command: `bd show ${id}`,
+    }),
+  });
+}
+
 async function withTemporaryGetNextTaskStub(
   stubbedGetNextTask: typeof BeadsTrackerPlugin.prototype.getNextTask,
   callback: () => Promise<void>
@@ -409,6 +427,123 @@ describe('BeadsBvTrackerPlugin', () => {
       expect(result?.metadata?.bvReasons).toEqual(['Top rank']);
       expect(result?.metadata?.bvUnblocks).toBe(5);
       expect(result?.metadata?.bvBreakdown).toEqual(breakdown);
+    });
+
+    test('falls back when bv pick is missing a configured label', async () => {
+      const plugin = new BeadsBvTrackerPlugin();
+      const fallbackTask: TrackerTask = {
+        id: 'fallback-task',
+        title: 'Label-scoped fallback task',
+        status: 'open',
+        priority: 2,
+        labels: ['repo:site-djbclark', 'kind:feature'],
+      };
+
+      const state = plugin as unknown as {
+        bvAvailable: boolean;
+        labels: string[];
+        scheduleTriageRefresh: () => void;
+        getTask: (id: string) => Promise<TrackerTask | undefined>;
+      };
+      state.bvAvailable = true;
+      state.labels = ['repo:site-djbclark', 'kind:feature'];
+      state.scheduleTriageRefresh = () => {};
+      state.getTask = async () => ({
+        id: 'task-42',
+        title: 'Robot next task',
+        status: 'open',
+        priority: 2,
+        labels: ['repo:site-djbclark'],
+      });
+      queueRobotNextTask();
+
+      await withTemporaryGetNextTaskStub(async () => fallbackTask, async () => {
+        const result = await plugin.getNextTask();
+        expect(result).toEqual(fallbackTask);
+      });
+    });
+
+    test('returns bv metadata when the pick carries every configured label', async () => {
+      const plugin = new BeadsBvTrackerPlugin();
+      const state = plugin as unknown as {
+        bvAvailable: boolean;
+        labels: string[];
+        scheduleTriageRefresh: () => void;
+        getTask: (id: string) => Promise<TrackerTask | undefined>;
+      };
+      state.bvAvailable = true;
+      state.labels = ['repo:site-djbclark', 'kind:feature'];
+      state.scheduleTriageRefresh = () => {};
+      state.getTask = async () => ({
+        id: 'task-42',
+        title: 'Robot next task',
+        status: 'open',
+        priority: 2,
+        labels: ['repo:site-djbclark', 'kind:feature'],
+      });
+      queueRobotNextTask();
+
+      const result = await plugin.getNextTask();
+
+      expect(result?.id).toBe('task-42');
+      expect(result?.metadata?.bvScore).toBe(0.9);
+      expect(result?.metadata?.bvReasons).toEqual(['Top rank']);
+      expect(result?.metadata?.bvUnblocks).toBe(5);
+    });
+
+    test('uses filter labels instead of configured labels for verification', async () => {
+      const plugin = new BeadsBvTrackerPlugin();
+      const state = plugin as unknown as {
+        bvAvailable: boolean;
+        labels: string[];
+        scheduleTriageRefresh: () => void;
+        getTask: (id: string) => Promise<TrackerTask | undefined>;
+      };
+      state.bvAvailable = true;
+      state.labels = ['repo:site-configured'];
+      state.scheduleTriageRefresh = () => {};
+      state.getTask = async () => ({
+        id: 'task-42',
+        title: 'Robot next task',
+        status: 'open',
+        priority: 2,
+        labels: ['repo:site-filter'],
+      });
+      queueRobotNextTask();
+
+      const result = await plugin.getNextTask({
+        labels: ['repo:site-filter'],
+      });
+
+      expect(result?.id).toBe('task-42');
+      expect(result?.metadata?.bvScore).toBe(0.9);
+    });
+
+    test('falls back when the task cannot be fetched under a label scope', async () => {
+      const plugin = new BeadsBvTrackerPlugin();
+      const fallbackTask: TrackerTask = {
+        id: 'fallback-task',
+        title: 'Label-scoped fallback task',
+        status: 'open',
+        priority: 2,
+      };
+
+      const state = plugin as unknown as {
+        bvAvailable: boolean;
+        labels: string[];
+        scheduleTriageRefresh: () => void;
+        getTask: (id: string) => Promise<TrackerTask | undefined>;
+      };
+      state.bvAvailable = true;
+      state.labels = ['repo:site-djbclark'];
+      state.scheduleTriageRefresh = () => {};
+      state.getTask = async () => undefined;
+      queueRobotNextTask();
+
+      await withTemporaryGetNextTaskStub(async () => fallbackTask, async () => {
+        const result = await plugin.getNextTask();
+        expect(result).toEqual(fallbackTask);
+      });
     });
 
     test('reuses cached epic children between getNextTask calls', async () => {

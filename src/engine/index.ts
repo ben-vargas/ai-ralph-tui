@@ -978,17 +978,17 @@ export class ExecutionEngine {
       iteration,
     });
 
-    // Update task status to in_progress
-    await this.tracker!.updateTaskStatus(task.id, 'in_progress');
-
-    // Emit task:activated for crash recovery tracking
-    // This allows the session to track which tasks it "owns" for reset on shutdown
+    // Record ownership before the status write so crash recovery can reset the
+    // task even if the write is interrupted.
     this.emit({
       type: 'task:activated',
       timestamp: new Date().toISOString(),
       task,
       iteration,
     });
+
+    // Update task status to in_progress
+    await this.tracker!.updateTaskStatus(task.id, 'in_progress');
 
     // Build prompt (includes recent progress context + tracker-owned template)
     const prompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
