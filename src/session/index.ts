@@ -469,6 +469,7 @@ export {
   listAllSessions,
   cleanupStaleRegistryEntries,
   findSessionsByPrefix,
+  getRegistryDir,
   getRegistryFilePath,
   loadRegistry,
   type SessionRegistryEntry,

@@ -3,8 +3,8 @@
  * Covers registration, lookup, listing, and cleanup of sessions.
  */
 
-import { describe, expect, test, afterEach } from 'bun:test';
-import { open, unlink, rename, readFile } from 'node:fs/promises';
+import { describe, expect, test, beforeAll, beforeEach, afterEach, afterAll } from 'bun:test';
+import { open, unlink, rename, readFile, mkdtemp, rm, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -20,22 +20,50 @@ import {
   cleanupStaleRegistryEntries,
   findSessionsByPrefix,
   getRegistryFilePath,
+  getRegistryDir,
   type SessionRegistryEntry,
 } from './registry.js';
 
-// Mock the registry directory for tests
-// Note: These tests modify the actual registry file at ~/.config/ralph-tui/sessions.json
-// In a real test environment, we'd want to mock the file system or use dependency injection
-
 describe('Session Registry', () => {
   let testSessionIds: string[] = [];
+  let originalConfigDir: string | undefined;
+  let testRegistryDir: string | undefined;
+
+  beforeAll(() => {
+    originalConfigDir = process.env.RALPH_TUI_CONFIG_DIR;
+  });
+
+  beforeEach(async () => {
+    testRegistryDir = await mkdtemp(join(tmpdir(), 'ralph-tui-registry-'));
+    process.env.RALPH_TUI_CONFIG_DIR = testRegistryDir;
+  });
 
   // Clean up any test sessions after each test
   afterEach(async () => {
-    for (const id of testSessionIds) {
-      await unregisterSession(id);
+    try {
+      for (const id of testSessionIds) {
+        await unregisterSession(id);
+      }
+      testSessionIds = [];
+    } finally {
+      if (testRegistryDir) {
+        await rm(testRegistryDir, { recursive: true, force: true });
+        testRegistryDir = undefined;
+      }
+      if (originalConfigDir === undefined) {
+        delete process.env.RALPH_TUI_CONFIG_DIR;
+      } else {
+        process.env.RALPH_TUI_CONFIG_DIR = originalConfigDir;
+      }
     }
-    testSessionIds = [];
+  });
+
+  afterAll(() => {
+    if (originalConfigDir === undefined) {
+      delete process.env.RALPH_TUI_CONFIG_DIR;
+    } else {
+      process.env.RALPH_TUI_CONFIG_DIR = originalConfigDir;
+    }
   });
 
   describe('registerSession', () => {
@@ -119,8 +147,15 @@ describe('Session Registry', () => {
     });
 
     test('does not fail for non-existent session', async () => {
-      // Should not throw
       await updateRegistryStatus('non-existent-session', 'paused');
+
+      let lockExists = true;
+      try {
+        await access(join(testRegistryDir!, 'sessions.lock'));
+      } catch {
+        lockExists = false;
+      }
+      expect(lockExists).toBe(false);
     });
   });
 
@@ -377,12 +412,10 @@ describe('Session Registry', () => {
   });
 
   describe('getRegistryFilePath', () => {
-    test('returns a valid path string', () => {
+    test('uses RALPH_TUI_CONFIG_DIR when set', () => {
       const path = getRegistryFilePath();
-      expect(typeof path).toBe('string');
-      expect(path).toContain('sessions.json');
-      expect(path).toContain('.config');
-      expect(path).toContain('ralph-tui');
+      expect(getRegistryDir()).toBe(testRegistryDir!);
+      expect(path).toBe(join(testRegistryDir!, 'sessions.json'));
     });
   });
 

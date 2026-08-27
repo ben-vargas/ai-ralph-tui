@@ -22,10 +22,6 @@ import {
 import type { FileHandle } from 'node:fs/promises';
 import type { SessionStatus } from './types.js';
 
-/**
- * Registry file location in user's config directory
- */
-const REGISTRY_DIR = join(homedir(), '.config', 'ralph-tui');
 const REGISTRY_FILE = 'sessions.json';
 const LOCK_FILE = 'sessions.lock';
 
@@ -97,30 +93,38 @@ export interface SessionRegistry {
 }
 
 /**
+ * Get the registry directory.
+ */
+export function getRegistryDir(): string {
+  return process.env.RALPH_TUI_CONFIG_DIR?.trim() || join(homedir(), '.config', 'ralph-tui');
+}
+
+/**
  * Get the registry file path
  */
 function getRegistryPath(): string {
-  return join(REGISTRY_DIR, REGISTRY_FILE);
+  return join(getRegistryDir(), REGISTRY_FILE);
 }
 
 /**
  * Get the lock file path
  */
 function getLockPath(): string {
-  return join(REGISTRY_DIR, LOCK_FILE);
+  return join(getRegistryDir(), LOCK_FILE);
 }
 
 /**
  * Ensure registry directory exists with correct permissions
  */
 async function ensureRegistryDir(): Promise<void> {
+  const registryDir = getRegistryDir();
   try {
-    await access(REGISTRY_DIR, constants.F_OK);
+    await access(registryDir, constants.F_OK);
     // Directory exists, ensure correct permissions
-    await chmod(REGISTRY_DIR, DIR_MODE);
+    await chmod(registryDir, DIR_MODE);
   } catch {
     // Directory doesn't exist, create with correct permissions
-    await mkdir(REGISTRY_DIR, { recursive: true, mode: DIR_MODE });
+    await mkdir(registryDir, { recursive: true, mode: DIR_MODE });
   }
 }
 
@@ -319,6 +323,11 @@ export async function updateRegistryStatus(
   sessionId: string,
   status: SessionStatus
 ): Promise<void> {
+  const registry = await loadRegistryInternal();
+  if (!registry.sessions[sessionId]) {
+    return;
+  }
+
   await withRegistryLock((registry) => {
     const entry = registry.sessions[sessionId];
     if (entry) {
