@@ -99,6 +99,7 @@ import { basename, join } from 'node:path';
 import { getEnvExclusionReport, formatEnvExclusionReport } from '../plugins/agents/base.js';
 import { writeFileAtomic } from '../session/atomic-write.js';
 import { formatDuration } from '../utils/logger.js';
+import { initializeAndReportPluginLoadFailures } from './plugin-load.js';
 
 type PersistState = (state: PersistedSessionState) => void | Promise<void>;
 
@@ -1406,7 +1407,10 @@ async function initializePlugins(): Promise<void> {
   const agentRegistry = getAgentRegistry();
   const trackerRegistry = getTrackerRegistry();
 
-  await Promise.all([agentRegistry.initialize(), trackerRegistry.initialize()]);
+  await initializeAndReportPluginLoadFailures(
+    () => agentRegistry.initialize(),
+    () => trackerRegistry.initialize()
+  );
 }
 
 /**

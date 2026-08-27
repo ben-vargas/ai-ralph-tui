@@ -201,6 +201,14 @@ Key methods for trackers:
 - `completeTask(id, reason)` - Mark task done
 - `updateTaskStatus(id, status)` - Update task state
 
+### Custom Plugins
+
+Add agent or tracker plugins as `.ts` or `.js` files under
+`~/.config/ralph-tui/plugins/agents/` or `~/.config/ralph-tui/plugins/trackers/`,
+each default-exporting a factory function. External packages should import
+plugin interfaces from `ralph-tui/plugin`; importing `ralph-tui` also loads the
+terminal renderer, and a mismatched `@opentui/core` copy can fail at import time.
+
 ## Next Steps
 
 Learn about specific plugins:

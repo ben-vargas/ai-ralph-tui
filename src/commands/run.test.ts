@@ -23,6 +23,7 @@ import {
   type TaskRangeFilter,
   type ParallelConflictState,
 } from './run.js';
+import { initializeAndReportPluginLoadFailures } from './plugin-load.js';
 import type { ExecutionScope, TrackerPlugin, TrackerTask } from '../plugins/trackers/types.js';
 import type {
   FileConflict,
@@ -261,6 +262,42 @@ describe('resolveExecutionScopes', () => {
     } finally {
       console.error = originalError;
     }
+  });
+});
+
+describe('initializeAndReportPluginLoadFailures', () => {
+  test('warns for failed results from both registry initializers', async () => {
+    const originalWarn = console.warn;
+    const warnings: unknown[][] = [];
+    const agentRegistry = {
+      initialize: async () => [
+        { success: true },
+        { success: false, error: 'Failed to load plugin broken-agent.ts: import exploded' },
+      ],
+    };
+    const trackerRegistry = {
+      initialize: async () => [
+        { success: false, error: 'Failed to load plugin broken-tracker.ts: import exploded' },
+        { success: false },
+      ],
+    };
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args);
+    };
+
+    try {
+      await initializeAndReportPluginLoadFailures(
+        () => agentRegistry.initialize(),
+        () => trackerRegistry.initialize()
+      );
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(warnings).toEqual([
+      ['  ⚠ Failed to load plugin broken-agent.ts: import exploded'],
+      ['  ⚠ Failed to load plugin broken-tracker.ts: import exploded'],
+    ]);
   });
 });
 
