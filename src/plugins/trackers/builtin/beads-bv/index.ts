@@ -10,6 +10,7 @@ import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { BeadsTrackerPlugin } from '../beads/index.js';
+import { parseBeadsJsonArray } from '../../beads-json.js';
 import { BEADS_BV_TEMPLATE } from '../../../../templates/builtin.js';
 import type {
   TrackerPluginMeta,
@@ -256,6 +257,7 @@ export class BeadsBvTrackerPlugin extends BeadsTrackerPlugin {
   private triageRefreshInFlight: Promise<void> | null = null;
   private pendingForcedTriageRefresh = false;
   private lastTriageRefreshAt = 0;
+  private labelScopeWarningShown = false;
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     // Initialize base beads plugin
@@ -431,13 +433,34 @@ export class BeadsBvTrackerPlugin extends BeadsTrackerPlugin {
         }
       }
 
+      const labelsToVerify =
+        filter?.labels && filter.labels.length > 0
+          ? filter.labels
+          : this.getLabels();
+      if (labelsToVerify.length > 0 && !this.labelScopeWarningShown) {
+        this.labelScopeWarningShown = true;
+        console.warn(
+          "bv's --robot-next does not apply label scoping. ralph-tui verifies bv's pick against the configured labels and falls back to bd's native label filtering when it does not match."
+        );
+      }
+
+      // Fetch full task details before accepting bv's pick. The --label option
+      // on bv --robot-next is ineffective, so mirror bd's --label AND
+      // semantics: the task must carry every label in the effective scope.
+      const fullTask = await this.getTask(nextOutput.id);
+      if (
+        labelsToVerify.length > 0 &&
+        (!fullTask ||
+          !labelsToVerify.every((label) => fullTask.labels?.includes(label)))
+      ) {
+        return super.getNextTask(filter);
+      }
+
       // Refresh triage data in background for metadata enrichment.
       this.scheduleTriageRefresh();
 
       const cachedBreakdown = this.getCachedBreakdown(nextOutput.id);
 
-      // Get full task details from bd for complete information
-      const fullTask = await this.getTask(nextOutput.id);
       if (fullTask) {
         if (statusFilter && !statusFilter.includes(fullTask.status)) {
           return super.getNextTask(filter);
@@ -699,7 +722,7 @@ export class BeadsBvTrackerPlugin extends BeadsTrackerPlugin {
     }
 
     try {
-      const beads = JSON.parse(stdout) as Array<{ id: string }>;
+      const beads = parseBeadsJsonArray<{ id: string }>(stdout);
       return beads.map((b) => b.id);
     } catch {
       return [];

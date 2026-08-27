@@ -7,8 +7,9 @@
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, join } from 'node:path';
+import { resolve, relative, isAbsolute } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
+import { resolveBeadsDir } from '../../beads-dir.js';
 import { sortDottedChildTaskIds } from '../../task-ordering.js';
 import { BEADS_RUST_TEMPLATE } from '../../../../templates/builtin.js';
 import type {
@@ -92,12 +93,13 @@ export interface BeadsRustDetectResult {
  */
 async function execBr(
   args: string[],
-  cwd?: string
+  cwd?: string,
+  envOverrides?: Record<string, string>
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   return new Promise((resolve) => {
     const proc = spawn('br', args, {
       cwd,
-      env: { ...process.env },
+      env: { ...process.env, ...envOverrides },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -285,6 +287,7 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
   private workingDir: string = process.cwd();
   private epicId: string = '';
   protected labels: string[] = [];
+  private beadsDirResolution: ReturnType<typeof resolveBeadsDir> | undefined;
 
   override async initialize(config: Record<string, unknown>): Promise<void> {
     await super.initialize(config);
@@ -327,19 +330,24 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     const beadsDir =
       typeof this.config.beadsDir === 'string' ? this.config.beadsDir : '.beads';
 
-    // Check for .beads directory
-    const beadsDirPath = join(workingDir, beadsDir);
+    const beadsDirResolution = resolveBeadsDir(workingDir, beadsDir);
+    this.beadsDirResolution = beadsDirResolution;
+    const beadsDirPath = beadsDirResolution.path;
     try {
       await access(beadsDirPath, constants.R_OK);
     } catch {
       return {
         available: false,
-        error: `Beads directory not found: ${beadsDirPath}`,
+        error: `Beads directory not found: ${beadsDirPath} (resolved from ${beadsDirResolution.source})`,
       };
     }
 
     // Check for br binary
-    const { stdout, stderr, exitCode } = await execBr(['--version'], workingDir);
+    const { stdout, stderr, exitCode } = await execBr(
+      ['--version'],
+      workingDir,
+      this.getCommandEnv()
+    );
     if (exitCode !== 0) {
       return {
         available: false,
@@ -367,6 +375,13 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     return this.ready;
   }
 
+  private getCommandEnv(): Record<string, string> | undefined {
+    if (this.beadsDirResolution?.explicit) {
+      return { BEADS_DIR: this.beadsDirResolution.path };
+    }
+    return undefined;
+  }
+
   override async getTasks(filter?: TaskFilter): Promise<TrackerTask[]> {
     // Always include closed tasks; UI controls visibility.
     const args = ['list', '--json', '--all', '--limit', '0'];
@@ -384,7 +399,11 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       args.push('--status', mapStatusToBr(filter.status));
     }
 
-    const { stdout, exitCode, stderr } = await execBr(args, this.workingDir);
+    const { stdout, exitCode, stderr } = await execBr(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error('br list failed:', stderr);
@@ -438,7 +457,11 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       args.push('--label', this.labels.join(','));
     }
 
-    const { stdout, exitCode, stderr } = await execBr(args, this.workingDir);
+    const { stdout, exitCode, stderr } = await execBr(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error('br list --type epic failed:', stderr);
@@ -466,7 +489,8 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
   override async getTask(id: string): Promise<TrackerTask | undefined> {
     const { stdout, exitCode, stderr } = await execBr(
       ['show', id, '--json'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -536,7 +560,8 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
   private async enrichTaskDependencies(task: TrackerTask): Promise<void> {
     const { stdout, stderr, exitCode } = await execBr(
       ['dep', 'list', task.id, '--json'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -591,7 +616,8 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
 
       const { stdout, exitCode } = await execBr(
         ['dep', 'list', current, '--direction', 'up', '--json'],
-        this.workingDir
+        this.workingDir,
+        this.getCommandEnv()
       );
 
       if (exitCode !== 0) {
@@ -625,6 +651,34 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
    * dependency information for client-side readiness filtering.
    */
   override async getNextTask(filter?: TaskFilter): Promise<TrackerTask | undefined> {
+    const statuses = filter?.status
+      ? (Array.isArray(filter.status) ? filter.status : [filter.status])
+      : ['open', 'in_progress'];
+
+    if (statuses.includes('in_progress')) {
+      // br ready only returns unblocked open work, so look up already-started
+      // tasks separately to ensure interrupted work can be resumed.
+      const requestedTypes = filter?.type
+        ? (Array.isArray(filter.type) ? filter.type : [filter.type])
+        : [];
+      const allowsEpics = requestedTypes.includes('epic');
+      const started = (await this.getTasks({
+        ...filter,
+        status: ['in_progress'],
+      })).filter((task) => allowsEpics || task.type !== 'epic');
+      if (started.length > 0) {
+        return started.reduce((selected, task) =>
+          task.priority < selected.priority ? task : selected
+        );
+      }
+    }
+
+    // br ready only returns open work, so it cannot answer a request that
+    // excludes open tasks.
+    if (!statuses.includes('open')) {
+      return undefined;
+    }
+
     const args = ['ready', '--json'];
 
     // We only need one task, but fetch a small batch so we can prefer
@@ -660,7 +714,11 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       args.push('--assignee', filter.assignee);
     }
 
-    const { stdout, exitCode, stderr } = await execBr(args, this.workingDir);
+    const { stdout, exitCode, stderr } = await execBr(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error('br ready failed:', stderr);
@@ -721,7 +779,11 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       args.push('--reason', reason);
     }
 
-    const { exitCode, stderr, stdout } = await execBr(args, this.workingDir);
+    const { exitCode, stderr, stdout } = await execBr(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       return {
@@ -748,7 +810,11 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     const brStatus = mapStatusToBr(status);
     const args = ['update', id, '--status', brStatus];
 
-    const { exitCode, stderr } = await execBr(args, this.workingDir);
+    const { exitCode, stderr } = await execBr(
+      args,
+      this.workingDir,
+      this.getCommandEnv()
+    );
 
     if (exitCode !== 0) {
       console.error(`br update ${id} --status ${brStatus} failed:`, stderr);
@@ -764,7 +830,8 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     // does not run any git operations.
     const { exitCode, stderr, stdout } = await execBr(
       ['sync', '--flush-only'],
-      this.workingDir
+      this.workingDir,
+      this.getCommandEnv()
     );
 
     if (exitCode !== 0) {
@@ -800,7 +867,11 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     }
 
     try {
-      const epicResult = await execBr(['show', epicId, '--json'], this.workingDir);
+      const epicResult = await execBr(
+        ['show', epicId, '--json'],
+        this.workingDir,
+        this.getCommandEnv()
+      );
       if (epicResult.exitCode !== 0) {
         return null;
       }
