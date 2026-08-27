@@ -7,8 +7,9 @@
 import { spawn } from 'node:child_process';
 import { access, constants } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { isAbsolute, join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
+import { resolveBeadsDir } from '../../beads-dir.js';
 import { sortDottedChildTaskIds } from '../../task-ordering.js';
 import { BEADS_TEMPLATE } from '../../../../templates/builtin.js';
 import type {
@@ -79,31 +80,6 @@ interface DetectResult {
   bdVersion?: string;
   error?: string;
 }
-
-function resolveBeadsDir(
-  workingDir: string,
-  configuredBeadsDir: string
-): { path: string; source: string } {
-  if (isAbsolute(configuredBeadsDir)) {
-    return { path: configuredBeadsDir, source: 'configured beadsDir' };
-  }
-
-  const environmentBeadsDir = process.env.BEADS_DIR?.trim();
-  if (environmentBeadsDir) {
-    return {
-      path: isAbsolute(environmentBeadsDir)
-        ? environmentBeadsDir
-        : resolve(workingDir, environmentBeadsDir),
-      source: 'BEADS_DIR',
-    };
-  }
-
-  return {
-    path: join(workingDir, configuredBeadsDir),
-    source: 'workingDir and beadsDir',
-  };
-}
-
 
 /**
  * Execute a bd command and return the output.

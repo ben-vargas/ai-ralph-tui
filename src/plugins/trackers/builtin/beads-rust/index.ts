@@ -7,8 +7,9 @@
 import { spawn } from 'node:child_process';
 import { constants } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
-import { resolve, relative, isAbsolute, join } from 'node:path';
+import { resolve, relative, isAbsolute } from 'node:path';
 import { BaseTrackerPlugin } from '../../base.js';
+import { resolveBeadsDir } from '../../beads-dir.js';
 import { sortDottedChildTaskIds } from '../../task-ordering.js';
 import { BEADS_RUST_TEMPLATE } from '../../../../templates/builtin.js';
 import type {
@@ -74,30 +75,6 @@ interface BrDepListItem {
   title: string;
   status: string;
   priority: number;
-}
-
-function resolveBeadsDir(
-  workingDir: string,
-  configuredBeadsDir: string
-): { path: string; source: string } {
-  if (isAbsolute(configuredBeadsDir)) {
-    return { path: configuredBeadsDir, source: 'configured beadsDir' };
-  }
-
-  const environmentBeadsDir = process.env.BEADS_DIR?.trim();
-  if (environmentBeadsDir) {
-    return {
-      path: isAbsolute(environmentBeadsDir)
-        ? environmentBeadsDir
-        : resolve(workingDir, environmentBeadsDir),
-      source: 'BEADS_DIR',
-    };
-  }
-
-  return {
-    path: join(workingDir, configuredBeadsDir),
-    source: 'workingDir and beadsDir',
-  };
 }
 
 /**

@@ -196,6 +196,30 @@ describe('BeadsRustTrackerPlugin', () => {
     expect(mockAccessPaths).not.toContain('/test/.beads');
   });
 
+  test('resolves a relative BEADS_DIR under workingDir', async () => {
+    process.env.BEADS_DIR = 'shared/.beads';
+    mockAccessFailPaths = ['/test/.beads'];
+    mockSpawnResponses = [
+      { exitCode: 0, stdout: 'br version 0.4.1\n' },
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
+        ]),
+      },
+    ];
+
+    const plugin = new BeadsRustTrackerPlugin();
+    await plugin.initialize({ workingDir: '/test' });
+    mockSpawnArgs = [];
+
+    const task = await plugin.getNextTask();
+
+    expect(task?.id).toBe('t1');
+    expect(mockAccessPaths).toContain('/test/shared/.beads');
+    expect(mockAccessPaths).not.toContain('/test/.beads');
+  });
+
   test('checks an absolute configured beadsDir as-is', async () => {
     mockSpawnResponses = [
       { exitCode: 0, stdout: 'br version 0.4.1\n' },

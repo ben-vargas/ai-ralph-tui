@@ -158,18 +158,6 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(result.error).toContain('Beads directory not found');
       // Should not attempt bd --version since dir check failed first
       expect(mockSpawnArgs.length).toBe(0);
-
-      const originalError = console.error;
-      const errorMessages: string[] = [];
-      console.error = (...args: unknown[]) => {
-        errorMessages.push(args.map((arg) => String(arg)).join(' '));
-      };
-      try {
-        expect(await plugin.getNextTask()).toBeUndefined();
-      } finally {
-        console.error = originalError;
-      }
-      expect(errorMessages.join('\n')).toContain('Beads tracker detection failed');
     });
 
     test('uses BEADS_DIR when no local .beads directory exists', async () => {
@@ -193,6 +181,30 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
       expect(task?.id).toBe('t1');
       expect(mockAccessPaths).toContain('/shared/project/.beads');
+      expect(mockAccessPaths).not.toContain('/test/.beads');
+    });
+
+    test('resolves a relative BEADS_DIR under workingDir', async () => {
+      process.env.BEADS_DIR = 'shared/.beads';
+      mockAccessFailPaths = ['/test/.beads'];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: 'bd version 1.2.0 (abc123)\n' },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't1', title: 'Task 1', status: 'open', priority: 2 },
+          ]),
+        },
+      ];
+
+      const plugin = new BeadsTrackerPlugin();
+      await plugin.initialize({ workingDir: '/test' });
+      mockSpawnArgs = [];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('t1');
+      expect(mockAccessPaths).toContain('/test/shared/.beads');
       expect(mockAccessPaths).not.toContain('/test/.beads');
     });
 
@@ -895,6 +907,25 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
   // ── getNextTask ────────────────────────────────────────────────────
 
   describe('getNextTask', () => {
+    test('returns undefined and logs when detection fails', async () => {
+      mockAccessShouldFail = true;
+      const plugin = new BeadsTrackerPlugin();
+      await plugin.initialize({ workingDir: '/test' });
+
+      const originalError = console.error;
+      const errorMessages: string[] = [];
+      console.error = (...args: unknown[]) => {
+        errorMessages.push(args.map((arg) => String(arg)).join(' '));
+      };
+      try {
+        expect(await plugin.getNextTask()).toBeUndefined();
+      } finally {
+        console.error = originalError;
+      }
+
+      expect(errorMessages.join('\n')).toContain('Beads tracker detection failed');
+    });
+
     test('calls bd ready --json --limit 10', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
