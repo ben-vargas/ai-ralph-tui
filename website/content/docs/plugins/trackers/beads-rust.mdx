@@ -210,11 +210,10 @@ Beads uses 0-4 priority scale (0 = critical):
 
 The Beads-Rust tracker selects the next task by:
 
-1. Filter to tasks under the specified epic
-2. Filter to tasks with status `open`
-3. Filter to tasks with no unresolved dependencies
-4. Sort by priority (lowest number first)
-5. Return the first matching task
+1. Filter to tasks within the configured epic and label scope
+2. Resume an already-`in_progress` task within the configured scope, preferring the lowest priority number
+3. Otherwise use `br ready` to select open work with no unresolved dependencies
+4. Return the first matching task
 
 ## Git Sync
 
@@ -281,7 +280,7 @@ to it or that `beadsDir` is configured with its absolute path.
 
 Check that:
 1. **Tasks are children of the epic**: `br list --parent <epic>`
-2. **Tasks are `open` status**: `br list --status open`
+2. **Tasks are `open` or `in_progress` status**: `br list --all` (tasks stuck in another status, such as `blocked`, won't be selected)
 3. **Dependencies are met**: `br show <task-id>`
 4. **Label filter matches** (if configured): `br list --label <your-label>`
 

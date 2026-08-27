@@ -180,6 +180,7 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
     private lastTriageRefreshAt = 0;
     private workingDir: string = process.cwd();
     private labels: string[] = [];
+    private labelScopeWarningShown = false;
 
     constructor() {
         super();
@@ -349,13 +350,27 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             }
 
             const nextOutput = nextOutputRaw as BvRobotNextTask;
+            const labelsToVerify =
+                filter?.labels && filter.labels.length > 0
+                    ? filter.labels
+                    : this.labels;
+            if (labelsToVerify.length > 0 && !this.labelScopeWarningShown) {
+                this.labelScopeWarningShown = true;
+                console.warn(
+                    "bv's --robot-next does not apply label scoping. ralph-tui verifies bv's pick against the configured labels and falls back to br's native label filtering when it does not match."
+                );
+            }
 
             // Check epic membership: if an epic filter is active, ensure bv's pick
             // belongs to it, otherwise fall back.
             const epicFilter = filter?.parentId;
             if (epicFilter) {
                 const fullTask = await this.delegate.getTask(nextOutput.id);
-                if (!fullTask || fullTask.parentId !== epicFilter) {
+                if (
+                    !fullTask ||
+                    fullTask.parentId !== epicFilter ||
+                    !this.matchesLabelScope(fullTask, labelsToVerify)
+                ) {
                     return this.delegateGetNextTaskFiltered(filter, statusFilter);
                 }
                 if (statusFilter && !statusFilter.includes(fullTask.status)) {
@@ -378,6 +393,9 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
             // Fetch full task details.
             const fullTask = await this.delegate.getTask(nextOutput.id);
             if (fullTask) {
+                if (!this.matchesLabelScope(fullTask, labelsToVerify)) {
+                    return this.delegateGetNextTaskFiltered(filter, statusFilter);
+                }
                 if (statusFilter && !statusFilter.includes(fullTask.status)) {
                     return this.delegateGetNextTaskFiltered(filter, statusFilter);
                 }
@@ -388,6 +406,10 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
                     bvUnblocks: nextOutput.unblocks,
                 };
                 return fullTask;
+            }
+
+            if (labelsToVerify.length > 0) {
+                return this.delegateGetNextTaskFiltered(filter, statusFilter);
             }
 
             if (statusFilter && !statusFilter.includes('open')) {
@@ -569,6 +591,18 @@ export class BeadsRustBvTrackerPlugin extends BaseTrackerPlugin {
         }
 
         return Array.isArray(statusFilter) ? statusFilter : [statusFilter];
+    }
+
+    private matchesLabelScope(
+        task: TrackerTask | undefined,
+        labels: string[]
+    ): boolean {
+        if (labels.length === 0) {
+            return true;
+        }
+
+        // Mirror br's --label AND semantics: every label must be present.
+        return task !== undefined && labels.every((label) => task.labels?.includes(label));
     }
 
     /**
