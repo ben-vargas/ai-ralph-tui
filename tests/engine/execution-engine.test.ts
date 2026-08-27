@@ -360,6 +360,74 @@ describe('ExecutionEngine', () => {
         );
       });
 
+      test('can stop again after continuing execution', async () => {
+        engine = new ExecutionEngine(config);
+        engine.on((event) => events.push(event));
+
+        const task = createTrackerTask({ id: 'task-restart' });
+        let releaseInProgress!: () => void;
+        let inProgressUpdate: Promise<void>;
+        let iterationCount = 0;
+        const statuses: string[] = [];
+
+        (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve([task])
+        );
+        (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve(false)
+        );
+        (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() => {
+          iterationCount++;
+          return Promise.resolve(iterationCount <= 2 ? task : undefined);
+        });
+        (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(
+          async (_taskId: string, status: string) => {
+            statuses.push(status);
+            if (status === 'in_progress') {
+              inProgressUpdate = new Promise<void>((resolve) => {
+                releaseInProgress = resolve;
+              });
+              await inProgressUpdate;
+            }
+          }
+        );
+
+        await engine.initialize();
+        const startPromise = engine.start();
+        while (!statuses.includes('in_progress')) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        const firstStop = engine.stop();
+        releaseInProgress();
+        await Promise.all([firstStop, startPromise]);
+
+        const continuePromise = engine.continueExecution();
+        while (statuses.filter((status) => status === 'in_progress').length < 2) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+
+        const secondStop = engine.stop();
+        expect(
+          events.filter((event) => event.type === 'engine:stopped')
+        ).toHaveLength(1);
+
+        releaseInProgress();
+        await Promise.all([secondStop, continuePromise]);
+
+        const stopEvents = events.filter(
+          (event) => event.type === 'engine:stopped'
+        );
+        expect(stopEvents).toHaveLength(2);
+        expect(stopEvents[1]).toMatchObject({ reason: 'interrupted' });
+        (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve(undefined as TrackerTask | undefined)
+        );
+        (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(() =>
+          Promise.resolve()
+        );
+      });
+
       test('stop transitions through stopping to idle', async () => {
         engine = new ExecutionEngine(config);
 

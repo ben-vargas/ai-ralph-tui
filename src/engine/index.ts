@@ -519,6 +519,7 @@ export class ExecutionEngine {
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
     this.shouldStop = false;
+    this.stopPromise = null;
 
     // Fetch all tasks including completed for TUI display
     // Open/in_progress tasks are actionable; completed tasks are for historical view
@@ -1711,6 +1712,7 @@ export class ExecutionEngine {
 
     this.state.status = 'running';
     this.shouldStop = false;
+    this.stopPromise = null;
 
     // Emit resumed event
     this.emit({
