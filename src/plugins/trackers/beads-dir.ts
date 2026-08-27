@@ -3,7 +3,7 @@
  * Resolves configured and environment-provided store paths consistently.
  */
 
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
 export const DEFAULT_BEADS_DIR = '.beads';
 
@@ -32,7 +32,7 @@ export function resolveBeadsDir(
   }
 
   return {
-    path: join(workingDir, configuredBeadsDir),
+    path: resolve(workingDir, configuredBeadsDir),
     source: 'workingDir and beadsDir',
     explicit: configuredBeadsDir !== DEFAULT_BEADS_DIR,
   };

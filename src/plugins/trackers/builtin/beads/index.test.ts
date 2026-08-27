@@ -9,6 +9,7 @@
 
 import { describe, test, expect, mock, beforeEach, beforeAll, afterAll, afterEach } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { resolve } from 'node:path';
 
 let mockAccessShouldFail = false;
 let mockAccessFailPaths: string[] = [];
@@ -262,6 +263,17 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
       await plugin.getTasks();
       expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBe('/test/shared/.beads');
+    });
+
+    test('resolves a relative workingDir and beadsDir to an absolute store path', async () => {
+      const workingDir = 'work';
+      const beadsDir = 'shared/.beads';
+      const plugin = await createInitializedPlugin({ workingDir, beadsDir });
+      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+
+      await plugin.getTasks();
+
+      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBe(resolve(workingDir, beadsDir));
     });
 
     test('does not inject BEADS_DIR for the relative default store', async () => {
