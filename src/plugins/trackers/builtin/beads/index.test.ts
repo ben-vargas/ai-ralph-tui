@@ -9,6 +9,7 @@
 
 import { describe, test, expect, mock, beforeEach, beforeAll, afterAll } from 'bun:test';
 import { EventEmitter } from 'node:events';
+import { parseBeadsJsonArray, unwrapBeadsEnvelope } from '../../beads-json.js';
 
 let mockAccessShouldFail = false;
 
@@ -44,6 +45,67 @@ function createMockChildProcess(response: MockSpawnResponse) {
 
 // Declare the class type for the import
 let BeadsTrackerPlugin: typeof import('./index.js').BeadsTrackerPlugin;
+
+describe('Beads JSON helpers', () => {
+  test('unwraps an envelope array', () => {
+    const data = [{ id: 'task-1' }];
+
+    expect(
+      unwrapBeadsEnvelope({ schema_version: 1, data })
+    ).toEqual(data);
+  });
+
+  test('unwraps envelope data with pagination', () => {
+    const data = [{ id: 'task-1' }];
+
+    expect(
+      unwrapBeadsEnvelope({
+        schema_version: 1,
+        data,
+        pagination: { returned: 1, total: 1, truncated: true },
+      })
+    ).toEqual(data);
+  });
+
+  test('passes through a legacy bare array', () => {
+    const data = [{ id: 'task-1' }];
+
+    expect(unwrapBeadsEnvelope(data)).toBe(data);
+    expect(parseBeadsJsonArray<{ id: string }>(JSON.stringify(data))).toEqual(data);
+  });
+
+  test('throws envelope error details', () => {
+    expect(() =>
+      parseBeadsJsonArray(
+        JSON.stringify({
+          schema_version: 1,
+          data: { error: 'Task not found', code: 'NOT_FOUND', hint: 'Check the ID' },
+        })
+      )
+    ).toThrow('Task not found; code: NOT_FOUND; hint: Check the ID');
+  });
+
+  test('does not unwrap an object without schema_version', () => {
+    const value = { data: [] };
+
+    expect(unwrapBeadsEnvelope(value)).toBe(value);
+    expect(() =>
+      parseBeadsJsonArray(JSON.stringify(value))
+    ).toThrow('parseBeadsJsonArray expected an array');
+  });
+
+  test('rejects an envelope with non-array data', () => {
+    expect(() =>
+      parseBeadsJsonArray(
+        JSON.stringify({ schema_version: 1, data: { tasks: [] } })
+      )
+    ).toThrow('parseBeadsJsonArray expected an array');
+  });
+
+  test('throws on malformed JSON', () => {
+    expect(() => parseBeadsJsonArray('not json')).toThrow();
+  });
+});
 
 /**
  * Helper: queue mock responses for initialize (access + bd --version).
@@ -361,6 +423,56 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(tasks[0]?.labels).toEqual(['frontend']);
     });
 
+    test('unwraps an envelope from bd list output', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              { id: 't1', title: 'Envelope task', status: 'open', priority: 2 },
+            ],
+          }),
+        },
+      ];
+
+      const tasks = await plugin.getTasks();
+
+      expect(tasks[0]?.id).toBe('t1');
+      expect(tasks[0]?.title).toBe('Envelope task');
+    });
+
+    test('returns an empty result for a bd list envelope error', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: { error: 'list failed', code: 'LIST_ERROR' },
+          }),
+        },
+      ];
+
+      const originalError = console.error;
+      const errors: unknown[][] = [];
+      console.error = (...args: unknown[]) => {
+        errors.push(args);
+      };
+
+      let tasks: Awaited<ReturnType<typeof plugin.getTasks>>;
+      try {
+        tasks = await plugin.getTasks();
+      } finally {
+        console.error = originalError;
+      }
+
+      expect(tasks).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(String(errors[0]?.[1])).toContain('list failed');
+    });
+
     test('maps bd statuses to TrackerTaskStatus correctly', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
@@ -530,6 +642,38 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       ]);
     });
 
+    test('unwraps envelopes for bd list and dependency enrichment', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              {
+                id: 't1',
+                title: 'Task',
+                status: 'open',
+                priority: 2,
+                dependency_count: 1,
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [{ issue_id: 't1', depends_on_id: 'dep1', type: 'blocks' }],
+          }),
+        },
+      ];
+
+      const tasks = await plugin.getTasks();
+
+      expect(tasks[0]?.dependsOn).toEqual(['dep1']);
+    });
+
     test('merges enriched dependencies with existing dependencies and deduplicates', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
@@ -649,6 +793,26 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(mockSpawnArgs[0]?.args).toEqual(['show', 'task-1', '--json']);
       expect(task?.id).toBe('task-1');
       expect(task?.title).toBe('My Task');
+    });
+
+    test('unwraps an envelope from bd show output', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              { id: 'task-1', title: 'Envelope task', status: 'open', priority: 2 },
+            ],
+          }),
+        },
+      ];
+
+      const task = await plugin.getTask('task-1');
+
+      expect(task?.id).toBe('task-1');
+      expect(task?.title).toBe('Envelope task');
     });
 
     test('returns undefined when bd show fails', async () => {
@@ -823,6 +987,27 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(mockSpawnArgs[1]?.args).toContain('--limit');
       expect(mockSpawnArgs[1]?.args).toContain('10');
       expect(task?.id).toBe('t1');
+    });
+
+    test('unwraps an envelope from bd ready output', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              { id: 't1', title: 'Envelope ready task', status: 'open', priority: 1 },
+            ],
+          }),
+        },
+      ];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('t1');
+      expect(task?.title).toBe('Envelope ready task');
     });
 
     test('passes --parent flag from epicId', async () => {
@@ -1156,6 +1341,25 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(epics.map((e) => e.id)).toEqual(['e1', 'e3']);
     });
 
+    test('unwraps an envelope from bd epic list output', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              { id: 'e1', title: 'Envelope Epic', status: 'open', priority: 1, issue_type: 'epic' },
+            ],
+          }),
+        },
+      ];
+
+      const epics = await plugin.getEpics();
+
+      expect(epics.map((epic) => epic.id)).toEqual(['e1']);
+    });
+
     test('returns empty array when bd list fails', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [{ exitCode: 1, stderr: 'error' }];
@@ -1293,6 +1497,44 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(result!.content).toBe('# My PRD\n\nRequirements here');
       expect(result!.totalCount).toBe(3);
       expect(result!.completedCount).toBe(2); // closed + cancelled
+    });
+
+    test('unwraps envelopes for PRD epic and child lookups', async () => {
+      const plugin = await createInitializedPlugin({ epicId: 'epic-1' });
+      mockReadFileContent = 'PRD content';
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              {
+                id: 'epic-1',
+                title: 'Envelope epic',
+                status: 'open',
+                priority: 1,
+                external_ref: 'prd:./docs/prd.md',
+              },
+            ],
+          }),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            schema_version: 1,
+            data: [
+              { id: 't1', title: 'T1', status: 'closed', priority: 2 },
+              { id: 't2', title: 'T2', status: 'open', priority: 2 },
+            ],
+          }),
+        },
+      ];
+
+      const result = await plugin.getPrdContext();
+
+      expect(result?.name).toBe('Envelope epic');
+      expect(result?.totalCount).toBe(2);
+      expect(result?.completedCount).toBe(1);
     });
 
     test('returns null when epic show fails', async () => {

@@ -110,6 +110,13 @@ beadsDir = ".beads"
 The `epicId` should be set via `--epic` flag rather than config, since you'll likely work on different epics.
 </Callout>
 
+### JSON Output Compatibility
+
+The Beads tracker reads both legacy `bd --json` payloads and the
+`BD_JSON_ENVELOPE=1` format, which wraps payloads in `{ schema_version, data }`.
+The envelope is also the default in bd v2.0, so no tracker configuration is
+needed for either format.
+
 ## Multi-Epic Parallel Execution
 
 The Beads tracker supports multi-epic parallel runs when tasks are organized as children of epics:
