@@ -185,11 +185,10 @@ Beads uses 0-4 priority scale (0 = critical):
 
 The Beads tracker selects the next task by:
 
-1. Filter to tasks under the specified epic
-2. Filter to tasks with status `open`
-3. Filter to tasks with no unresolved dependencies
-4. Sort by priority (lowest number first)
-5. Return the first matching task
+1. Filter to tasks within the configured epic and label scope
+2. Resume an already-`in_progress` task within the configured scope, preferring the lowest priority number
+3. Otherwise use `bd ready` to select open work with no unresolved dependencies
+4. Return the first matching task
 
 ## Git Sync
 
@@ -283,7 +282,7 @@ Install the Beads CLI from the **[Beads GitHub repo](https://github.com/steveyeg
 
 Check that:
 1. **Tasks are children of the epic**: `bd list --parent <epic>` (create with `--parent <epic>`)
-2. **Tasks are `open` status**: `bd list --status open`
+2. **Tasks are `open` or `in_progress` status**: `bd list --all` (tasks stuck in another status, such as `blocked`, won't be selected)
 3. **Dependencies are met**: `bd show <task-id>` (blocked tasks won't be selected)
 4. **Label filter matches** (if configured): `bd list --label <your-label>`
 

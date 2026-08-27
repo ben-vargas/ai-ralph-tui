@@ -806,6 +806,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
     test('calls bd ready --json --limit 10', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify([
@@ -817,16 +818,19 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       const task = await plugin.getNextTask();
 
       expect(mockSpawnArgs[0]?.cmd).toBe('bd');
-      expect(mockSpawnArgs[0]?.args).toContain('ready');
-      expect(mockSpawnArgs[0]?.args).toContain('--json');
-      expect(mockSpawnArgs[0]?.args).toContain('--limit');
-      expect(mockSpawnArgs[0]?.args).toContain('10');
+      expect(mockSpawnArgs[1]?.args).toContain('ready');
+      expect(mockSpawnArgs[1]?.args).toContain('--json');
+      expect(mockSpawnArgs[1]?.args).toContain('--limit');
+      expect(mockSpawnArgs[1]?.args).toContain('10');
       expect(task?.id).toBe('t1');
     });
 
     test('passes --parent flag from epicId', async () => {
       const plugin = await createInitializedPlugin({ epicId: 'my-epic' });
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       await plugin.getNextTask();
 
@@ -836,7 +840,10 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     test('filter parentId overrides epicId in getNextTask', async () => {
       const plugin = await createInitializedPlugin({ epicId: 'my-epic' });
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       await plugin.getNextTask({ parentId: 'filter-epic' });
 
@@ -846,7 +853,10 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     test('passes --label flag from configured labels', async () => {
       const plugin = await createInitializedPlugin({ labels: 'frontend,backend' });
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       await plugin.getNextTask();
 
@@ -856,37 +866,47 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     test('passes --priority flag', async () => {
       const plugin = await createInitializedPlugin();
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       await plugin.getNextTask({ priority: 1 });
 
-      expect(mockSpawnArgs[0]?.args).toContain('--priority');
-      expect(mockSpawnArgs[0]?.args).toContain('1');
+      expect(mockSpawnArgs[1]?.args).toContain('--priority');
+      expect(mockSpawnArgs[1]?.args).toContain('1');
     });
 
     test('uses highest priority (lowest number) for multiple priorities', async () => {
       const plugin = await createInitializedPlugin();
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       await plugin.getNextTask({ priority: [3, 1, 2] });
 
-      expect(mockSpawnArgs[0]?.args).toContain('--priority');
-      expect(mockSpawnArgs[0]?.args).toContain('1');
+      expect(mockSpawnArgs[1]?.args).toContain('--priority');
+      expect(mockSpawnArgs[1]?.args).toContain('1');
     });
 
     test('passes --assignee flag', async () => {
       const plugin = await createInitializedPlugin();
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       await plugin.getNextTask({ assignee: 'alice@test.com' });
 
-      expect(mockSpawnArgs[0]?.args).toContain('--assignee');
-      expect(mockSpawnArgs[0]?.args).toContain('alice@test.com');
+      expect(mockSpawnArgs[1]?.args).toContain('--assignee');
+      expect(mockSpawnArgs[1]?.args).toContain('alice@test.com');
     });
 
     test('prefers in_progress tasks over open tasks', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify([
@@ -901,9 +921,119 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(task?.id).toBe('t2');
     });
 
+    test('resumes an in_progress task when ready returns nothing', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't-wip', title: 'In progress', status: 'in_progress', priority: 2 },
+          ]),
+        },
+        { exitCode: 0, stdout: '[]' },
+      ];
+
+      const task = await plugin.getNextTask({
+        status: ['open', 'in_progress'],
+      });
+
+      expect(task?.id).toBe('t-wip');
+    });
+
+    test('prefers the highest-priority in_progress task over ready work', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't-wip', title: 'In progress', status: 'in_progress', priority: 1 },
+            { id: 't-wip-later', title: 'Later', status: 'in_progress', priority: 3 },
+          ]),
+        },
+      ];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('t-wip');
+    });
+
+    test('skips excluded in_progress tasks before selecting ready work', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't-wip', title: 'Skip', status: 'in_progress', priority: 1 },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't-open', title: 'Open', status: 'open', priority: 2 },
+          ]),
+        },
+      ];
+
+      const task = await plugin.getNextTask({ excludeIds: ['t-wip'] });
+
+      expect(task?.id).toBe('t-open');
+    });
+
+    test('does not look up in_progress tasks when the filter only allows open', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 't-open', title: 'Open', status: 'open', priority: 2 },
+          ]),
+        },
+      ];
+
+      const task = await plugin.getNextTask({ status: ['open'] });
+
+      expect(task?.id).toBe('t-open');
+      expect(mockSpawnArgs).toHaveLength(1);
+      expect(mockSpawnArgs[0]?.args).toContain('ready');
+    });
+
+    test('returns undefined for an in_progress-only filter without ready work', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+
+      const task = await plugin.getNextTask({ status: ['in_progress'] });
+
+      expect(task).toBeUndefined();
+      expect(mockSpawnArgs).toHaveLength(1);
+      expect(mockSpawnArgs[0]?.args).not.toContain('ready');
+    });
+
+    test('does not resume in_progress epics as tasks', async () => {
+      const plugin = await createInitializedPlugin();
+      mockSpawnResponses = [
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'epic', title: 'In progress epic', issue_type: 'epic', status: 'in_progress', priority: 0 },
+          ]),
+        },
+        {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { id: 'task', title: 'Open task', issue_type: 'task', status: 'open', priority: 1 },
+          ]),
+        },
+      ];
+
+      const task = await plugin.getNextTask();
+
+      expect(task?.id).toBe('task');
+    });
+
     test('excludes task IDs from excludeIds filter', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify([
@@ -921,6 +1051,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
     test('returns undefined when all tasks excluded', async () => {
       const plugin = await createInitializedPlugin();
       mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
         {
           exitCode: 0,
           stdout: JSON.stringify([
@@ -947,7 +1078,10 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     test('returns undefined when bd ready fails', async () => {
       const plugin = await createInitializedPlugin();
-      mockSpawnResponses = [{ exitCode: 1, stderr: 'ready error' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 1, stderr: 'ready error' },
+      ];
 
       const task = await plugin.getNextTask();
 
@@ -956,7 +1090,10 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     test('returns undefined when bd ready returns invalid JSON', async () => {
       const plugin = await createInitializedPlugin();
-      mockSpawnResponses = [{ exitCode: 0, stdout: 'not json' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: 'not json' },
+      ];
 
       const task = await plugin.getNextTask();
 
@@ -965,7 +1102,10 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
 
     test('returns undefined when bd ready returns empty array', async () => {
       const plugin = await createInitializedPlugin();
-      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      mockSpawnResponses = [
+        { exitCode: 0, stdout: '[]' },
+        { exitCode: 0, stdout: '[]' },
+      ];
 
       const task = await plugin.getNextTask();
 

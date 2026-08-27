@@ -105,6 +105,7 @@ function createControllableAgent(options: {
 function createControllableTracker(options: {
   tasks?: TrackerTask[];
   completesAfter?: number;
+  onUpdateTaskStatus?: (taskId: string, status: string) => void;
 } = {}) {
   let tasks = options.tasks ?? createTrackerTasks(2);
   let completedCount = 0;
@@ -176,6 +177,7 @@ function createControllableTracker(options: {
       return [];
     },
     async updateTaskStatus(taskId, status) {
+      options.onUpdateTaskStatus?.(taskId, status);
       const task = tasks.find(t => t.id === taskId);
       if (task) {
         task.status = status;
@@ -612,9 +614,11 @@ describe('ExecutionEngine Integration', () => {
       });
 
       const tasks = [createTrackerTask({ id: 'task-001', status: 'open' })];
+      const ordering: string[] = [];
       mockTrackerRegistry = createControllableTracker({
         tasks,
         completesAfter: 1,
+        onUpdateTaskStatus: () => ordering.push('tracker:updateTaskStatus'),
       });
 
       const engine = new ExecutionEngine({
@@ -626,7 +630,12 @@ describe('ExecutionEngine Integration', () => {
         errorHandling: { strategy: 'skip', maxRetries: 0, retryDelayMs: 0, continueOnNonZeroExit: false },
       } as any);
 
-      engine.on((event) => events.push(event));
+      engine.on((event) => {
+        events.push(event);
+        if (event.type === 'task:activated') {
+          ordering.push('event:task:activated');
+        }
+      });
 
       await engine.initialize();
 
@@ -636,6 +645,10 @@ describe('ExecutionEngine Integration', () => {
       // Verify task was activated
       const activatedEvent = events.find(e => e.type === 'task:activated');
       expect(activatedEvent).toBeDefined();
+      expect(ordering).toEqual([
+        'event:task:activated',
+        'tracker:updateTaskStatus',
+      ]);
 
       await engine.dispose();
     });
