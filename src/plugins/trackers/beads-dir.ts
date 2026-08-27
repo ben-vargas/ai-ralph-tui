@@ -5,6 +5,8 @@
 
 import { isAbsolute, join, resolve } from 'node:path';
 
+export const DEFAULT_BEADS_DIR = '.beads';
+
 /**
  * Resolve a Beads store path, honoring configured absolute paths, BEADS_DIR,
  * then the working directory and configured relative path. BEADS_DIR is
@@ -13,9 +15,9 @@ import { isAbsolute, join, resolve } from 'node:path';
 export function resolveBeadsDir(
   workingDir: string,
   configuredBeadsDir: string
-): { path: string; source: string } {
+): { path: string; source: string; explicit: boolean } {
   if (isAbsolute(configuredBeadsDir)) {
-    return { path: configuredBeadsDir, source: 'configured beadsDir' };
+    return { path: configuredBeadsDir, source: 'configured beadsDir', explicit: true };
   }
 
   const environmentBeadsDir = process.env.BEADS_DIR?.trim();
@@ -25,11 +27,13 @@ export function resolveBeadsDir(
         ? environmentBeadsDir
         : resolve(workingDir, environmentBeadsDir),
       source: 'BEADS_DIR',
+      explicit: false,
     };
   }
 
   return {
     path: join(workingDir, configuredBeadsDir),
     source: 'workingDir and beadsDir',
+    explicit: configuredBeadsDir !== DEFAULT_BEADS_DIR,
   };
 }

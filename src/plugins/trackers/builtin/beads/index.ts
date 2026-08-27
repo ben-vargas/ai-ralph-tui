@@ -330,7 +330,7 @@ export class BeadsTrackerPlugin extends BaseTrackerPlugin {
   }
 
   private getCommandEnv(): Record<string, string> | undefined {
-    if (this.beadsDirResolution?.source === 'configured beadsDir') {
+    if (this.beadsDirResolution?.explicit) {
       return { BEADS_DIR: this.beadsDirResolution.path };
     }
     return undefined;

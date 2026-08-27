@@ -134,6 +134,7 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
   });
 
   beforeEach(() => {
+    delete process.env.BEADS_DIR;
     mockAccessShouldFail = false;
     mockAccessFailPaths = [];
     mockAccessPaths = [];
@@ -256,7 +257,11 @@ describe('BeadsTrackerPlugin (mocked CLI)', () => {
       expect(result.available).toBe(true);
       expect(result.beadsDir).toBe('/test/shared/.beads');
       expect(mockAccessPaths[0]).toBe('/test/shared/.beads');
-      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBeUndefined();
+
+      mockSpawnArgs = [];
+      mockSpawnResponses = [{ exitCode: 0, stdout: '[]' }];
+      await plugin.getTasks();
+      expect(mockSpawnArgs[0]?.env?.BEADS_DIR).toBe('/test/shared/.beads');
     });
 
     test('does not inject BEADS_DIR for the relative default store', async () => {
