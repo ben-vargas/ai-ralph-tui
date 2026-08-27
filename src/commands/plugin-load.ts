@@ -3,14 +3,11 @@
  * Keeps plugin discovery warnings consistent across commands.
  */
 
-export interface PluginLoadResult {
-  success: boolean;
-  error?: string;
-}
+import type { PluginLoadResult } from '../plugins/agents/registry.js';
 
 type InitializePlugins = () => Promise<readonly PluginLoadResult[]>;
 
-export function reportPluginLoadFailures(
+function reportPluginLoadFailures(
   results: readonly PluginLoadResult[]
 ): void {
   for (const result of results) {

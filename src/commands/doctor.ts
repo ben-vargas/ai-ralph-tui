@@ -54,8 +54,11 @@ async function runDiagnostics(
   // Get agent registry
   const registry = getAgentRegistry();
 
-  // Discover user plugins (~/.config/ralph-tui/plugins/agents/) before
-  // resolving the requested agent.
+  // Discover user plugins (~/.config/ralph-tui/plugins/agents/) — run.tsx's
+  // initializePlugins() already does this before actually running an agent;
+  // doctor was missing it, so `doctor --agent <custom-plugin>` always
+  // reported "Unknown agent plugin" even for a plugin that `run` could
+  // load fine.
   const userPluginResults = await registry.initialize();
   for (const result of userPluginResults) {
     if (!result.success && result.error) {
@@ -63,8 +66,9 @@ async function runDiagnostics(
     }
   }
   if (process.env.RALPH_TUI_DEBUG_PLUGINS === '1') {
-    // Include structured results for diagnosing why a custom plugin did not
-    // register.
+    // Run and resume report human-readable load failures; this opt-in dump
+    // includes the structured results for diagnosing why a custom plugin did
+    // not register.
     console.error('DEBUG user plugin load results:', JSON.stringify(userPluginResults, null, 2));
   }
 

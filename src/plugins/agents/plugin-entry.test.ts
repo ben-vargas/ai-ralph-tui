@@ -11,16 +11,21 @@ const REPOSITORY_ROOT = resolve(import.meta.dir, '../../..');
 const PLUGIN_ENTRY = resolve(REPOSITORY_ROOT, 'src/plugin.ts');
 const FORBIDDEN_IMPORTS = new Set(['@opentui/core', '@opentui/react', 'react']);
 
-function findImportSpecifiers(source: string): string[] {
+export function findImportSpecifiers(source: string): string[] {
   const specifiers = new Set<string>();
   const fromPattern = /\b(?:import|export)\s+(?:type\s+)?[\s\S]*?\sfrom\s+['"]([^'"]+)['"]/g;
   const sideEffectPattern = /\bimport\s*['"]([^'"]+)['"]/g;
+  const dynamicPattern = /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
   for (const match of source.matchAll(fromPattern)) {
     const specifier = match[1];
     if (specifier) specifiers.add(specifier);
   }
   for (const match of source.matchAll(sideEffectPattern)) {
+    const specifier = match[1];
+    if (specifier) specifiers.add(specifier);
+  }
+  for (const match of source.matchAll(dynamicPattern)) {
     const specifier = match[1];
     if (specifier) specifiers.add(specifier);
   }
@@ -90,6 +95,10 @@ async function findForbiddenImports(): Promise<string[]> {
 }
 
 describe('ralph-tui/plugin entry point', () => {
+  test('finds forbidden dynamic imports in source text', () => {
+    expect(findImportSpecifiers("await import('@opentui/core');")).toContain('@opentui/core');
+  });
+
   test('does not reach OpenTUI or React through relative imports', async () => {
     const offenders = await findForbiddenImports();
     if (offenders.length > 0) {
