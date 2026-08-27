@@ -37,6 +37,25 @@ function queueSpawnResponse(response: MockSpawnResponse): void {
     spawnResponses.push(response);
 }
 
+function queueRobotNextTask(id = 'task-42'): void {
+    queueSpawnResponse({
+        command: 'bv',
+        stdout: JSON.stringify({
+            generated_at: '2026-02-24T00:00:00.000Z',
+            data_hash: 'hash',
+            output_format: 'json',
+            id,
+            title: 'Robot next task',
+            score: 0.9,
+            reasons: ['Top rank'],
+            unblocks: 5,
+            claim_command: `br update ${id} --status in_progress`,
+            show_command: `br show ${id}`,
+        }),
+        exitCode: 0,
+    });
+}
+
 describe('BeadsRustBvTrackerPlugin', () => {
     beforeAll(async () => {
         mock.module('node:child_process', () => ({
@@ -355,6 +374,149 @@ describe('BeadsRustBvTrackerPlugin', () => {
             expect(bvSpawn).toBeDefined();
             expect(bvSpawn?.args).toContain('--label');
             expect(bvSpawn?.args).toContain('backend');
+        });
+    });
+
+    describe('label scope', () => {
+        function configurePlugin(
+            labels: string[],
+            task: TrackerTask | undefined,
+            fallbackTask: TrackerTask,
+        ): BeadsRustBvTrackerPlugin {
+            const plugin = new BeadsRustBvTrackerPlugin();
+            const state = plugin as unknown as {
+                bvAvailable: boolean;
+                labels: string[];
+                delegate: {
+                    getTask: (id: string) => Promise<TrackerTask | undefined>;
+                    getNextTask: () => Promise<TrackerTask>;
+                };
+            };
+            state.bvAvailable = true;
+            state.labels = labels;
+            state.delegate.getTask = async () => task;
+            state.delegate.getNextTask = async () => fallbackTask;
+            return plugin;
+        }
+
+        test('falls back when bv pick is missing a configured label', async () => {
+            const fallbackTask: TrackerTask = {
+                id: 'fallback-task',
+                title: 'Label-scoped fallback task',
+                status: 'open',
+                priority: 2,
+                labels: ['repo:site-djbclark', 'kind:feature'],
+            };
+            const plugin = configurePlugin(
+                ['repo:site-djbclark', 'kind:feature'],
+                {
+                    id: 'task-42',
+                    title: 'Robot next task',
+                    status: 'open',
+                    priority: 2,
+                    labels: ['repo:site-djbclark'],
+                },
+                fallbackTask,
+            );
+            queueRobotNextTask();
+
+            const result = await plugin.getNextTask();
+
+            expect(result).toEqual(fallbackTask);
+        });
+
+        test('returns bv metadata when the pick carries every configured label', async () => {
+            const plugin = configurePlugin(
+                ['repo:site-djbclark', 'kind:feature'],
+                {
+                    id: 'task-42',
+                    title: 'Robot next task',
+                    status: 'open',
+                    priority: 2,
+                    labels: ['repo:site-djbclark', 'kind:feature'],
+                },
+                {
+                    id: 'fallback-task',
+                    title: 'Fallback task',
+                    status: 'open',
+                    priority: 2,
+                },
+            );
+            queueRobotNextTask();
+
+            const result = await plugin.getNextTask();
+
+            expect(result?.id).toBe('task-42');
+            expect(result?.metadata?.bvScore).toBe(0.9);
+            expect(result?.metadata?.bvReasons).toEqual(['Top rank']);
+            expect(result?.metadata?.bvUnblocks).toBe(5);
+        });
+
+        test('uses filter labels instead of configured labels for verification', async () => {
+            const plugin = configurePlugin(
+                ['repo:site-configured'],
+                {
+                    id: 'task-42',
+                    title: 'Robot next task',
+                    status: 'open',
+                    priority: 2,
+                    labels: ['repo:site-filter'],
+                },
+                {
+                    id: 'fallback-task',
+                    title: 'Fallback task',
+                    status: 'open',
+                    priority: 2,
+                },
+            );
+            queueRobotNextTask();
+
+            const result = await plugin.getNextTask({
+                labels: ['repo:site-filter'],
+            });
+
+            expect(result?.id).toBe('task-42');
+            expect(result?.metadata?.bvScore).toBe(0.9);
+        });
+
+        test('falls back when the task cannot be fetched under a label scope', async () => {
+            const fallbackTask: TrackerTask = {
+                id: 'fallback-task',
+                title: 'Label-scoped fallback task',
+                status: 'open',
+                priority: 2,
+                labels: ['repo:site-djbclark'],
+            };
+            const plugin = configurePlugin(
+                ['repo:site-djbclark'],
+                undefined,
+                fallbackTask,
+            );
+            queueRobotNextTask();
+
+            const result = await plugin.getNextTask();
+
+            expect(result).toEqual(fallbackTask);
+        });
+
+        test('preserves the minimal bv task fallback without a label scope', async () => {
+            const plugin = configurePlugin(
+                [],
+                undefined,
+                {
+                    id: 'delegate-task',
+                    title: 'Delegate task',
+                    status: 'open',
+                    priority: 2,
+                },
+            );
+            queueRobotNextTask();
+
+            const result = await plugin.getNextTask();
+
+            expect(result?.id).toBe('task-42');
+            expect(result?.title).toBe('Robot next task');
+            expect(result?.metadata?.bvScore).toBe(0.9);
         });
     });
 
