@@ -621,12 +621,6 @@ export class ExecutionEngine {
           if (!this.watchingIdle) {
             this.watchingIdle = true;
             this.emit({
-              type: 'all:complete',
-              timestamp: new Date().toISOString(),
-              totalCompleted: this.state.tasksCompleted,
-              totalIterations: this.state.currentIteration,
-            });
-            this.emit({
               type: 'engine:waiting',
               timestamp: new Date().toISOString(),
               reason: 'completed',

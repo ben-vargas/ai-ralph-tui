@@ -1199,7 +1199,7 @@ describe('ExecutionEngine', () => {
           (event) => event.type === 'engine:waiting' && event.reason === 'completed'
         )
       ).toHaveLength(1);
-      expect(events.filter((event) => event.type === 'all:complete')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'all:complete')).toHaveLength(0);
       expect(
         events.filter(
           (event) => event.type === 'engine:stopped' && event.reason === 'completed'
