@@ -1047,14 +1047,12 @@ describe('ExecutionEngine', () => {
           statuses.push(status);
           if (status === 'in_progress') {
             await new Promise<void>((resolve) => {
-              releaseInProgress = () => {
-                taskStatus = 'in_progress';
-                resolve();
-              };
+              releaseInProgress = resolve;
             });
           } else {
             taskStatus = status;
             if (status === 'open' && statuses.filter((value) => value === 'open').length === 1) {
+              taskStatus = 'in_progress';
               resolveReset();
             }
             return createTrackerTask({ id: task.id, status });
@@ -1249,7 +1247,7 @@ describe('ExecutionEngine', () => {
       ).toHaveLength(0);
     });
 
-    test('does one verification read when a timed-out reset remains open', async () => {
+    test('keeps verifying while a timed-out reset remains open', async () => {
       engine = new ExecutionEngine(config);
 
       const task = createTrackerTask({ id: 'task-stable-reset' });
@@ -1290,15 +1288,86 @@ describe('ExecutionEngine', () => {
       }
 
       await engine.stop(5);
-      await engine.resetTasksToOpen([task.id], {
+      const resetPromise = engine.resetTasksToOpen([task.id], {
         intervalMs: 1,
         timeoutMs: 20,
       });
-      releaseInProgress();
+      setTimeout(() => releaseInProgress(), 50);
+      await resetPromise;
       await startPromise;
 
       expect(statuses).toEqual(['in_progress', 'open']);
-      expect(getTaskCalls).toBe(1);
+      expect(getTaskCalls).toBeGreaterThan(1);
+    });
+
+    test('corrects a late write after an earlier clean verification read', async () => {
+      engine = new ExecutionEngine(config);
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'task-late-after-clean-read' });
+      const statuses: string[] = [];
+      let releaseInProgress!: () => void;
+      let getTaskCalls = 0;
+      let taskStatus: TrackerTask['status'] = 'open';
+
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([task])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(task)
+      );
+      (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(
+        async (_taskId: string, status: TrackerTask['status']) => {
+          statuses.push(status);
+          if (status === 'in_progress') {
+            await new Promise<void>((resolve) => {
+              releaseInProgress = resolve;
+            });
+          } else {
+            taskStatus = status;
+          }
+          return createTrackerTask({ id: task.id, status });
+        }
+      );
+      (mockTrackerInstance.getTask as ReturnType<typeof mock>).mockImplementation(() => {
+        getTaskCalls++;
+        if (getTaskCalls === 1) {
+          return Promise.resolve(createTrackerTask({ id: task.id, status: 'open' }));
+        }
+        if (getTaskCalls === 2) {
+          return Promise.resolve(createTrackerTask({ id: task.id, status: 'in_progress' }));
+        }
+        return Promise.resolve(createTrackerTask({ id: task.id, status: taskStatus }));
+      });
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (!statuses.includes('in_progress')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      await engine.stop(5);
+      const resetPromise = engine.resetTasksToOpen([task.id], {
+        intervalMs: 1,
+        timeoutMs: 20,
+      });
+      setTimeout(() => releaseInProgress(), 50);
+      await resetPromise;
+      await startPromise;
+
+      expect(statuses).toEqual(['in_progress', 'open', 'open']);
+      expect(taskStatus).toBe('open');
+      expect(getTaskCalls).toBeGreaterThanOrEqual(3);
+      expect(
+        events.filter(
+          (event) =>
+            event.type === 'engine:warning' &&
+            event.message.includes('was restored to open')
+        )
+      ).toHaveLength(1);
     });
 
     test('does not verify tasks after a clean drain', async () => {

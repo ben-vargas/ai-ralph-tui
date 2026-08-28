@@ -268,6 +268,8 @@ export class ExecutionEngine {
   private activeIteration: Promise<IterationResult> | null = null;
   private stopPromise: Promise<void> | null = null;
   private drainTimedOut = false;
+  private activeIterationSettled = true;
+  private timedOutIteration: Promise<IterationResult> | null = null;
   /** Track retry attempts per task */
   private retryCountMap: Map<string, number> = new Map();
   /** Track skipped tasks to avoid retrying them */
@@ -537,6 +539,8 @@ export class ExecutionEngine {
     this.shouldStop = false;
     this.stopPromise = null;
     this.drainTimedOut = false;
+    this.activeIterationSettled = true;
+    this.timedOutIteration = null;
 
     // Fetch all tasks including completed for TUI display
     // Open/in_progress tasks are actionable; completed tasks are for historical view
@@ -1558,7 +1562,19 @@ export class ExecutionEngine {
       this.currentExecution.interrupt();
     }
 
+    const activeIteration = this.activeIteration;
     this.drainTimedOut = !(await this.waitForActiveIteration(timeoutMs));
+    if (this.drainTimedOut && activeIteration) {
+      this.activeIterationSettled = false;
+      this.timedOutIteration = activeIteration;
+      void activeIteration
+        .finally(() => {
+          if (this.timedOutIteration === activeIteration) {
+            this.activeIterationSettled = true;
+          }
+        })
+        .catch(() => {});
+    }
 
     // Update session status
     await updateSessionStatus(this.config.cwd, 'interrupted');
@@ -1731,6 +1747,8 @@ export class ExecutionEngine {
     this.shouldStop = false;
     this.stopPromise = null;
     this.drainTimedOut = false;
+    this.activeIterationSettled = true;
+    this.timedOutIteration = null;
 
     // Emit resumed event
     this.emit({
@@ -1813,18 +1831,25 @@ export class ExecutionEngine {
     }
 
     let resetCount = 0;
+    const verificationTaskIds: string[] = [];
     for (const taskId of taskIds) {
       try {
         await this.tracker.updateTaskStatus(taskId, 'open');
         resetCount++;
         if (this.drainTimedOut) {
-          await this.verifyTimedOutTaskReset(taskId, verificationOptions);
+          verificationTaskIds.push(taskId);
         }
       } catch {
         // Silently continue on individual task reset failures
         // The task may have been deleted or modified externally
       }
     }
+
+    await Promise.all(
+      verificationTaskIds.map((taskId) =>
+        this.verifyTimedOutTaskReset(taskId, verificationOptions)
+      )
+    );
 
     return resetCount;
   }
@@ -1867,8 +1892,12 @@ export class ExecutionEngine {
             code: 'task-reset-race',
             message: `Task '${taskId}' was restored to open after a late in-progress update`,
           });
+          confirmationPending = false;
         }
-        return;
+        if (this.activeIterationSettled) {
+          return;
+        }
+        continue;
       }
 
       if (correctiveWrites >= TIMED_OUT_RESET_MAX_CORRECTIVE_WRITES) {
