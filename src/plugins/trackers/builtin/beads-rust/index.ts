@@ -284,6 +284,7 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
   /** Last detected br version (if available). */
   brVersion: string | undefined;
 
+  private detectionError: string | undefined;
   private workingDir: string = process.cwd();
   private epicId: string = '';
   protected labels: string[] = [];
@@ -310,6 +311,7 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     const detection = await this.detect();
     this.ready = detection.available;
     this.brVersion = detection.brVersion;
+    this.detectionError = detection.error;
   }
 
   /**
@@ -371,6 +373,7 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
       const detection = await this.detect();
       this.ready = detection.available;
       this.brVersion = detection.brVersion;
+      this.detectionError = detection.error;
     }
     return this.ready;
   }
@@ -651,6 +654,14 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
    * dependency information for client-side readiness filtering.
    */
   override async getNextTask(filter?: TaskFilter): Promise<TrackerTask | undefined> {
+    if (!(await this.isReady())) {
+      console.error(
+        'Beads-rust tracker detection failed:',
+        this.detectionError ?? 'unknown error'
+      );
+      return undefined;
+    }
+
     const statuses = filter?.status
       ? (Array.isArray(filter.status) ? filter.status : [filter.status])
       : ['open', 'in_progress'];
@@ -721,7 +732,7 @@ export class BeadsRustTrackerPlugin extends BaseTrackerPlugin {
     );
 
     if (exitCode !== 0) {
-      console.error('br ready failed:', stderr);
+      console.error('br ready failed:', stderr || (this.detectionError ?? ''));
       return undefined;
     }
 

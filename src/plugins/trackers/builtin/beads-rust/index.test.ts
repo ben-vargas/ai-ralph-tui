@@ -1162,6 +1162,30 @@ describe('BeadsRustTrackerPlugin', () => {
   });
 
   describe('getNextTask', () => {
+    test('returns undefined without invoking br ready when detection fails', async () => {
+      mockAccessShouldFail = true;
+      const originalError = console.error;
+      const errorMessages: string[] = [];
+      console.error = (...args: unknown[]) => {
+        errorMessages.push(args.map((arg) => String(arg)).join(' '));
+      };
+
+      try {
+        const plugin = new BeadsRustTrackerPlugin();
+        await plugin.initialize({ workingDir: '/test' });
+        mockSpawnArgs = [];
+
+        const task = await plugin.getNextTask();
+
+        expect(task).toBeUndefined();
+        expect(mockSpawnArgs).toHaveLength(0);
+        expect(errorMessages).toHaveLength(1);
+        expect(errorMessages[0]).toContain('Beads directory not found');
+      } finally {
+        console.error = originalError;
+      }
+    });
+
     test('executes br ready --json and supports filters', async () => {
       mockSpawnResponses = [
         { exitCode: 0, stdout: 'br version 0.4.1\n' },
