@@ -121,7 +121,7 @@ export const colors: ThemeColors = new Proxy({} as ThemeColors, {
 /**
  * Status indicator symbols
  * Task status: ✓ (done), ▶ (active/running), ○ (actionable/pending), ⊘ (blocked), ✗ (error), ✓ (closed - greyed)
- * Ralph status: ▶ (running), ◎ (pausing), ⏸ (paused), ■ (stopped), ✓ (complete), ○ (idle/ready), ◌ (waiting)
+ * Ralph status: ▶ (running), ◎ (pausing), ⏸ (paused), ■ (stopped), ✓ (complete), ○ (idle), ◉ (ready), ◌ (waiting)
  */
 export const statusIndicators = {
   done: '✓',
