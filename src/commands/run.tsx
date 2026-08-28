@@ -1226,7 +1226,7 @@ Options:
   --theme <name|path> Theme name (bright, catppuccin, dracula, high-contrast, solarized-light) or path to custom JSON theme file
   --iterations <n>    Maximum iterations (0 = unlimited)
   --delay <ms>        Delay between iterations in milliseconds
-  --watch              Wait for new tasks and start them automatically
+  --watch             Wait for new tasks and start them automatically
   --poll <seconds>    Poll interval in seconds (implies --watch, default: 30)
   --cwd <path>        Working directory
   --resume            Resume existing session
