@@ -1696,7 +1696,52 @@ describe('ExecutionEngine', () => {
       }
 
       expect(engine.getStatus()).toBe('waiting');
+      expect(events.filter((event) => event.type === 'engine:waiting')).toHaveLength(2);
       engine.stop();
+      await startPromise;
+    });
+
+    test('resumes into an available task without re-emitting waiting', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 20, maxIterations: 1 })
+      );
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'watch-resumed-task' });
+      let taskAvailable = false;
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(taskAvailable ? [task] : [])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(taskAvailable ? task : undefined)
+      );
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (events.every((event) => event.type !== 'engine:waiting')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.pause();
+      while (events.every((event) => event.type !== 'engine:paused')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      taskAvailable = true;
+      engine.resume();
+      while (events.every((event) => event.type !== 'iteration:started')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(events.filter((event) => event.type === 'engine:waiting')).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) => event.type === 'iteration:started' && event.task.id === task.id
+        )
+      ).toHaveLength(1);
       await startPromise;
     });
 
