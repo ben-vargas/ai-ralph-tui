@@ -1859,6 +1859,12 @@ export class ExecutionEngine {
       }
 
       if (correctiveWrites >= TIMED_OUT_RESET_MAX_CORRECTIVE_WRITES) {
+        this.emit({
+          type: 'engine:warning',
+          timestamp: new Date().toISOString(),
+          code: 'task-reset-race',
+          message: `Task '${taskId}' could not be returned to open after a late in-progress update; it may be owned by another process`,
+        });
         return;
       }
 
@@ -1872,6 +1878,12 @@ export class ExecutionEngine {
           message: `Task '${taskId}' was restored to open after a late in-progress update`,
         });
       } catch {
+        this.emit({
+          type: 'engine:warning',
+          timestamp: new Date().toISOString(),
+          code: 'task-reset-race',
+          message: `Task '${taskId}' could not be returned to open after a late in-progress update; the corrective update failed and it may be owned by another process`,
+        });
         return;
       }
     }

@@ -1189,6 +1189,7 @@ describe('ExecutionEngine', () => {
 
     test('caps corrective writes when the task remains in progress', async () => {
       engine = new ExecutionEngine(config);
+      engine.on((event) => events.push(event));
 
       const task = createTrackerTask({ id: 'task-capped-reset' });
       const statuses: string[] = [];
@@ -1228,13 +1229,20 @@ describe('ExecutionEngine', () => {
       await engine.stop(5);
       await engine.resetTasksToOpen([task.id], {
         intervalMs: 1,
-        timeoutMs: 20,
+        timeoutMs: 100,
       });
       releaseInProgress();
       await startPromise;
 
       expect(statuses).toEqual(['in_progress', 'open', 'open', 'open']);
       expect(getTaskCalls).toBe(3);
+      const giveUpWarnings = events.filter(
+        (event) =>
+          event.type === 'engine:warning' &&
+          event.code === 'task-reset-race' &&
+          event.message.includes('could not be returned to open')
+      );
+      expect(giveUpWarnings).toHaveLength(1);
     });
 
     test('resetTasksToOpen returns 0 before initialization', async () => {
