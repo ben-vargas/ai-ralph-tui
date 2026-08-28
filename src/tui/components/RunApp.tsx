@@ -1807,6 +1807,10 @@ export function RunApp({
           }
           break;
 
+        case 'engine:waiting':
+          setStatus('idle');
+          break;
+
         case 'engine:paused':
           setStatus('paused');
           break;

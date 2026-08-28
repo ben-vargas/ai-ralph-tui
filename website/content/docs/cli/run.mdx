@@ -39,6 +39,8 @@ Running `ralph-tui` without any command also starts the TUI interface, allowing 
 |--------|-------------|
 | `--iterations <n>` | Maximum iterations (0 = unlimited) |
 | `--delay <ms>` | Delay between iterations in milliseconds |
+| `--watch` | Keep the engine alive and start new tasks automatically as they become available |
+| `--poll <seconds>` | Poll for new tasks at the given interval (default: 30 seconds); implies `--watch` |
 | `--serial`, `--sequential` | Force sequential execution (disable parallel) |
 | `--parallel [N]` | Force parallel execution, optionally with N workers |
 | `--task-range <range>` | Filter tasks by index (e.g., `1-5`, `3-`, `-10`) |

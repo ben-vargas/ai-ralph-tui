@@ -68,6 +68,8 @@ function createMockConfig(): RalphConfig {
     tracker: { name: 'test', plugin: 'json', options: {} },
     maxIterations: 10,
     iterationDelay: 1000,
+    watch: false,
+    pollIntervalMs: 30000,
     outputDir: '/tmp/ralph-test-nonexistent/output',
     progressFile: '/tmp/ralph-test-nonexistent/progress.md',
     showTui: false,

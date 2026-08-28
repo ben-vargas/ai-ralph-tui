@@ -191,6 +191,12 @@ export interface RuntimeOptions {
   /** Delay between iterations in milliseconds */
   iterationDelay?: number;
 
+  /** Keep waiting for new tasks when no work is available */
+  watch?: boolean;
+
+  /** Polling interval in milliseconds when watching */
+  pollIntervalMs?: number;
+
   /** Working directory for execution */
   cwd?: string;
 
@@ -251,6 +257,12 @@ export interface StoredConfig {
 
   /** Default iteration delay in milliseconds */
   iterationDelay?: number;
+
+  /** Whether to keep waiting for new tasks */
+  watch?: boolean;
+
+  /** Polling interval in milliseconds when watching */
+  pollIntervalMs?: number;
 
   /** Configured agent plugins */
   agents?: AgentPluginConfig[];
@@ -376,6 +388,12 @@ export interface RalphConfig {
   /** Delay between iterations in milliseconds */
   iterationDelay: number;
 
+  /** Whether to keep waiting for new tasks */
+  watch: boolean;
+
+  /** Polling interval in milliseconds when watching */
+  pollIntervalMs: number;
+
   /** Working directory */
   cwd: string;
 
@@ -462,6 +480,8 @@ export const DEFAULT_ERROR_HANDLING: ErrorHandlingConfig = {
 export const DEFAULT_CONFIG: Omit<RalphConfig, "agent" | "tracker"> = {
   maxIterations: 10,
   iterationDelay: 1000,
+  watch: false,
+  pollIntervalMs: 30000,
   cwd: process.cwd(),
   outputDir: ".ralph-tui/iterations",
   progressFile: ".ralph-tui/progress.md",

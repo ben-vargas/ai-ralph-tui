@@ -85,6 +85,8 @@ function createTestConfig(overrides: Partial<RalphConfig> = {}): RalphConfig {
     cwd: '/test/project',
     maxIterations: 10,
     iterationDelay: 0, // No delay in tests
+    watch: false,
+    pollIntervalMs: 30000,
     agent: {
       name: 'claude',
       plugin: 'claude',
@@ -1119,6 +1121,123 @@ describe('ExecutionEngine', () => {
         (e) => e.type === 'engine:stopped' && 'reason' in e && e.reason === 'no_tasks'
       );
       expect(stopEvent).toBeDefined();
+    });
+  });
+
+  describe('watch mode', () => {
+    test('polls for newly available tasks and emits waiting once', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 20, maxIterations: 1 })
+      );
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'watch-task' });
+      let refreshCount = 0;
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() => {
+        refreshCount++;
+        return Promise.resolve(refreshCount >= 3 ? [task] : []);
+      });
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() => {
+        return Promise.resolve(refreshCount >= 3 ? task : undefined);
+      });
+
+      await engine.initialize();
+      await engine.start();
+
+      expect(refreshCount).toBeGreaterThanOrEqual(3);
+      expect(events.filter((event) => event.type === 'engine:waiting')).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) =>
+            event.type === 'engine:stopped' &&
+            event.reason === 'no_tasks'
+        )
+      ).toHaveLength(0);
+      expect(
+        events.filter((event) => event.type === 'iteration:started' && event.task.id === task.id)
+      ).toHaveLength(1);
+      expect(
+        events.find(
+          (event) =>
+            event.type === 'engine:stopped' && event.reason === 'max_iterations'
+        )
+      ).toBeDefined();
+
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(undefined as TrackerTask | undefined)
+      );
+    });
+
+    test('waits after completion and resumes when new work appears', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 20, maxIterations: 1 })
+      );
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'watch-completed-task' });
+      let refreshCount = 0;
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() => {
+        refreshCount++;
+        return Promise.resolve(refreshCount >= 3 ? [task] : []);
+      });
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(refreshCount < 3)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(refreshCount >= 3 ? task : undefined)
+      );
+
+      await engine.initialize();
+      await engine.start();
+
+      expect(events.filter((event) => event.type === 'engine:waiting')).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) => event.type === 'engine:waiting' && event.reason === 'completed'
+        )
+      ).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'all:complete')).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) => event.type === 'engine:stopped' && event.reason === 'completed'
+        )
+      ).toHaveLength(0);
+
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(undefined as TrackerTask | undefined)
+      );
+    });
+
+    test('stops promptly while waiting for the next poll', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 1000 })
+      );
+      engine.on((event) => events.push(event));
+
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(undefined as TrackerTask | undefined)
+      );
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (events.every((event) => event.type !== 'engine:waiting')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      const startedAt = Date.now();
+      await engine.stop();
+      await startPromise;
+
+      expect(Date.now() - startedAt).toBeLessThan(500);
     });
   });
 });

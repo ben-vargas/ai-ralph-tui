@@ -475,6 +475,15 @@ describe('StoredConfigSchema', () => {
     expect(() => StoredConfigSchema.parse({ iterationDelay: 300001 })).toThrow();
   });
 
+  test('validates watch polling configuration', () => {
+    expect(StoredConfigSchema.parse({ watch: true, pollIntervalMs: 30000 })).toMatchObject({
+      watch: true,
+      pollIntervalMs: 30000,
+    });
+    expect(() => StoredConfigSchema.parse({ pollIntervalMs: 0 })).toThrow();
+    expect(() => StoredConfigSchema.parse({ pollIntervalMs: -1 })).toThrow();
+  });
+
   test('rejects unknown fields (strict mode)', () => {
     expect(() => StoredConfigSchema.parse({ unknownField: 'value' })).toThrow();
   });

@@ -198,6 +198,7 @@ export interface IterationResult {
 export type EngineEventType =
   | 'engine:started'
   | 'engine:stopped'
+  | 'engine:waiting'
   | 'engine:paused'
   | 'engine:resumed'
   | 'engine:warning'
@@ -282,6 +283,17 @@ export interface EngineStoppedEvent extends EngineEventBase {
   totalIterations: number;
   /** Total tasks completed */
   tasksCompleted: number;
+}
+
+/**
+ * Engine waiting event - emitted when watch mode enters an idle state.
+ */
+export interface EngineWaitingEvent extends EngineEventBase {
+  type: 'engine:waiting';
+  /** Why the engine became idle */
+  reason: 'no_tasks' | 'completed';
+  /** Polling interval in milliseconds */
+  pollIntervalMs: number;
 }
 
 /**
@@ -632,6 +644,7 @@ export interface TasksRefreshedEvent extends EngineEventBase {
 export type EngineEvent =
   | EngineStartedEvent
   | EngineStoppedEvent
+  | EngineWaitingEvent
   | EnginePausedEvent
   | EngineResumedEvent
   | EngineWarningEvent

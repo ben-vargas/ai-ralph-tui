@@ -1003,6 +1003,21 @@ export function parseRunArgs(args: string[]): ExtendedRuntimeOptions {
         }
         break;
 
+      case '--watch':
+        options.watch = true;
+        break;
+
+      case '--poll':
+        if (nextArg && !nextArg.startsWith('-')) {
+          const parsed = Number(nextArg);
+          if (Number.isFinite(parsed) && parsed > 0) {
+            options.pollIntervalMs = parsed * 1000;
+            options.watch = true;
+          }
+          i++;
+        }
+        break;
+
       case '--cwd':
         if (nextArg && !nextArg.startsWith('-')) {
           options.cwd = nextArg;
@@ -1211,6 +1226,8 @@ Options:
   --theme <name|path> Theme name (bright, catppuccin, dracula, high-contrast, solarized-light) or path to custom JSON theme file
   --iterations <n>    Maximum iterations (0 = unlimited)
   --delay <ms>        Delay between iterations in milliseconds
+  --watch              Wait for new tasks and start them automatically
+  --poll <seconds>    Poll interval in seconds (implies --watch, default: 30)
   --cwd <path>        Working directory
   --resume            Resume existing session
   --force             Force start even if locked

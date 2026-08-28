@@ -206,6 +206,9 @@ function mergeConfigs(
     merged.maxIterations = project.maxIterations;
   if (project.iterationDelay !== undefined)
     merged.iterationDelay = project.iterationDelay;
+  if (project.watch !== undefined) merged.watch = project.watch;
+  if (project.pollIntervalMs !== undefined)
+    merged.pollIntervalMs = project.pollIntervalMs;
   if (project.outputDir !== undefined) merged.outputDir = project.outputDir;
   if (project.agent !== undefined) merged.agent = project.agent;
   if (project.model !== undefined) merged.model = project.model;
@@ -698,6 +701,11 @@ export async function buildConfig(
       options.iterationDelay ??
       storedConfig.iterationDelay ??
       DEFAULT_CONFIG.iterationDelay,
+    watch: options.watch ?? storedConfig.watch ?? DEFAULT_CONFIG.watch,
+    pollIntervalMs:
+      options.pollIntervalMs ??
+      storedConfig.pollIntervalMs ??
+      DEFAULT_CONFIG.pollIntervalMs,
     cwd: options.cwd ?? DEFAULT_CONFIG.cwd,
     outputDir:
       options.outputDir ?? storedConfig.outputDir ?? DEFAULT_CONFIG.outputDir,
@@ -830,6 +838,10 @@ export async function validateConfig(
   // Validate delay
   if (config.iterationDelay < 0) {
     errors.push("Iteration delay must be 0 or greater");
+  }
+
+  if (config.pollIntervalMs <= 0) {
+    errors.push("Poll interval must be greater than 0");
   }
 
   return {
