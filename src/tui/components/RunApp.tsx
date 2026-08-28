@@ -1015,6 +1015,9 @@ export function RunApp({
           setRemoteStatus(event.reason === 'completed' ? 'complete' : 'ready');
           break;
         case 'engine:waiting':
+          setRemoteCurrentTaskId(undefined);
+          setRemoteCurrentTaskTitle(undefined);
+          remoteCurrentTaskIdRef.current = undefined;
           setRemoteStatus('waiting');
           break;
         case 'engine:paused':
@@ -1811,6 +1814,9 @@ export function RunApp({
           break;
 
         case 'engine:waiting':
+          setCurrentTaskId(undefined);
+          setCurrentTaskTitle(undefined);
+          currentTaskIdRef.current = undefined;
           setStatus('waiting');
           break;
 
