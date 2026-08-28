@@ -903,10 +903,11 @@ export function RunApp({
       const state = await instanceManager.getRemoteState();
       if (state) {
         // Convert engine status to RalphStatus
-        // Engine statuses: 'idle' | 'running' | 'pausing' | 'paused' | 'stopping'
+        // Engine statuses: 'idle' | 'running' | 'waiting' | 'pausing' | 'paused' | 'stopping'
         const statusMap: Record<string, RalphStatus> = {
           idle: 'ready',
           running: 'running',
+          waiting: 'waiting',
           pausing: 'pausing',
           paused: 'paused',
           stopping: 'stopped',
