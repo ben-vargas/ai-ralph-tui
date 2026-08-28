@@ -1842,6 +1842,7 @@ export class ExecutionEngine {
       options.timeoutMs ?? TIMED_OUT_RESET_VERIFICATION_TIMEOUT_MS;
     const deadline = Date.now() + timeoutMs;
     let correctiveWrites = 0;
+    let confirmationPending = false;
 
     while (Date.now() < deadline) {
       const remainingMs = deadline - Date.now();
@@ -1854,7 +1855,19 @@ export class ExecutionEngine {
         return;
       }
 
-      if (!task || task.status !== 'in_progress') {
+      if (!task) {
+        return;
+      }
+
+      if (task.status !== 'in_progress') {
+        if (confirmationPending) {
+          this.emit({
+            type: 'engine:warning',
+            timestamp: new Date().toISOString(),
+            code: 'task-reset-race',
+            message: `Task '${taskId}' was restored to open after a late in-progress update`,
+          });
+        }
         return;
       }
 
@@ -1869,14 +1882,18 @@ export class ExecutionEngine {
       }
 
       try {
-        await this.tracker!.updateTaskStatus(taskId, 'open');
+        const result = await this.tracker!.updateTaskStatus(taskId, 'open');
+        if (result === undefined) {
+          this.emit({
+            type: 'engine:warning',
+            timestamp: new Date().toISOString(),
+            code: 'task-reset-race',
+            message: `Task '${taskId}' could not be returned to open after a late in-progress update; the corrective update failed and it may be owned by another process`,
+          });
+          return;
+        }
         correctiveWrites++;
-        this.emit({
-          type: 'engine:warning',
-          timestamp: new Date().toISOString(),
-          code: 'task-reset-race',
-          message: `Task '${taskId}' was restored to open after a late in-progress update`,
-        });
+        confirmationPending = true;
       } catch {
         this.emit({
           type: 'engine:warning',
@@ -1886,6 +1903,15 @@ export class ExecutionEngine {
         });
         return;
       }
+    }
+
+    if (confirmationPending) {
+      this.emit({
+        type: 'engine:warning',
+        timestamp: new Date().toISOString(),
+        code: 'task-reset-race',
+        message: `Task '${taskId}' could not be returned to open after a late in-progress update; verification expired before the corrective update was confirmed and it may be owned by another process`,
+      });
     }
   }
 

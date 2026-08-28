@@ -1057,6 +1057,7 @@ describe('ExecutionEngine', () => {
             if (status === 'open' && statuses.filter((value) => value === 'open').length === 1) {
               resolveReset();
             }
+            return createTrackerTask({ id: task.id, status });
           }
         }
       );
@@ -1089,6 +1090,165 @@ describe('ExecutionEngine', () => {
       ).toHaveLength(1);
     });
 
+    test('warns when a corrective reset returns undefined', async () => {
+      engine = new ExecutionEngine(config);
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'task-undefined-reset' });
+      const statuses: string[] = [];
+      let releaseInProgress!: () => void;
+      let resolveReset!: () => void;
+      const resetStarted = new Promise<void>((resolve) => {
+        resolveReset = resolve;
+      });
+      let openWrites = 0;
+
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([task])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(task)
+      );
+      (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(
+        async (_taskId: string, status: TrackerTask['status']) => {
+          statuses.push(status);
+          if (status === 'in_progress') {
+            await new Promise<void>((resolve) => {
+              releaseInProgress = resolve;
+            });
+            return;
+          }
+
+          openWrites++;
+          if (openWrites === 1) {
+            resolveReset();
+            return createTrackerTask({ id: task.id, status: 'open' });
+          }
+          return undefined;
+        }
+      );
+      (mockTrackerInstance.getTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(createTrackerTask({ id: task.id, status: 'in_progress' }))
+      );
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (!statuses.includes('in_progress')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      await engine.stop(5);
+      const resetPromise = engine.resetTasksToOpen([task.id], {
+        intervalMs: 1,
+        timeoutMs: 20,
+      });
+      await resetStarted;
+      releaseInProgress();
+      await resetPromise;
+      await startPromise;
+
+      expect(statuses).toEqual(['in_progress', 'open', 'open']);
+      const unresolvedWarnings = events.filter(
+        (event) =>
+          event.type === 'engine:warning' &&
+          event.code === 'task-reset-race' &&
+          event.message.includes('could not be returned to open')
+      );
+      expect(unresolvedWarnings).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) =>
+            event.type === 'engine:warning' &&
+            event.message.includes('was restored to open')
+        )
+      ).toHaveLength(0);
+    });
+
+    test('warns when corrective reset confirmation expires', async () => {
+      engine = new ExecutionEngine(config);
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'task-unconfirmed-reset' });
+      const statuses: string[] = [];
+      let releaseInProgress!: () => void;
+      let resolveReset!: () => void;
+      const resetStarted = new Promise<void>((resolve) => {
+        resolveReset = resolve;
+      });
+      let openWrites = 0;
+      let getTaskCalls = 0;
+
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([task])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(task)
+      );
+      (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(
+        async (_taskId: string, status: TrackerTask['status']) => {
+          statuses.push(status);
+          if (status === 'in_progress') {
+            await new Promise<void>((resolve) => {
+              releaseInProgress = resolve;
+            });
+            return;
+          }
+
+          openWrites++;
+          if (openWrites === 1) {
+            resolveReset();
+            return createTrackerTask({ id: task.id, status: 'open' });
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return createTrackerTask({ id: task.id, status: 'open' });
+        }
+      );
+      (mockTrackerInstance.getTask as ReturnType<typeof mock>).mockImplementation(() => {
+        getTaskCalls++;
+        return Promise.resolve(createTrackerTask({ id: task.id, status: 'in_progress' }));
+      });
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (!statuses.includes('in_progress')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      await engine.stop(5);
+      const resetPromise = engine.resetTasksToOpen([task.id], {
+        intervalMs: 1,
+        timeoutMs: 5,
+      });
+      await resetStarted;
+      releaseInProgress();
+      await resetPromise;
+      await startPromise;
+
+      expect(statuses).toEqual(['in_progress', 'open', 'open']);
+      expect(getTaskCalls).toBe(1);
+      const unresolvedWarnings = events.filter(
+        (event) =>
+          event.type === 'engine:warning' &&
+          event.code === 'task-reset-race' &&
+          event.message.includes('could not be returned to open')
+      );
+      expect(unresolvedWarnings).toHaveLength(1);
+      expect(
+        events.filter(
+          (event) =>
+            event.type === 'engine:warning' &&
+            event.message.includes('was restored to open')
+        )
+      ).toHaveLength(0);
+    });
+
     test('does one verification read when a timed-out reset remains open', async () => {
       engine = new ExecutionEngine(config);
 
@@ -1113,7 +1273,9 @@ describe('ExecutionEngine', () => {
             await new Promise<void>((resolve) => {
               releaseInProgress = resolve;
             });
+            return;
           }
+          return createTrackerTask({ id: task.id, status });
         }
       );
       (mockTrackerInstance.getTask as ReturnType<typeof mock>).mockImplementation(() => {
@@ -1163,7 +1325,9 @@ describe('ExecutionEngine', () => {
             await new Promise<void>((resolve) => {
               releaseInProgress = resolve;
             });
+            return;
           }
+          return createTrackerTask({ id: task.id, status });
         }
       );
       (mockTrackerInstance.getTask as ReturnType<typeof mock>).mockImplementation(() => {
@@ -1212,7 +1376,9 @@ describe('ExecutionEngine', () => {
             await new Promise<void>((resolve) => {
               releaseInProgress = resolve;
             });
+            return;
           }
+          return createTrackerTask({ id: task.id, status });
         }
       );
       (mockTrackerInstance.getTask as ReturnType<typeof mock>).mockImplementation(() => {
