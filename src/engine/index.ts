@@ -644,6 +644,9 @@ export class ExecutionEngine {
           if (this.shouldStop) {
             break;
           }
+          if (this.getStatus() === 'pausing') {
+            continue;
+          }
           try {
             await this.refreshTasks();
           } catch (error) {
@@ -688,6 +691,9 @@ export class ExecutionEngine {
           if (this.shouldStop) {
             break;
           }
+          if (this.getStatus() === 'pausing') {
+            continue;
+          }
           try {
             await this.refreshTasks();
           } catch (error) {
@@ -708,7 +714,9 @@ export class ExecutionEngine {
 
       // Run iteration with error handling
       this.watchingIdle = false;
-      this.state.status = 'running';
+      if (this.state.status === 'waiting') {
+        this.state.status = 'running';
+      }
       const iterationPromise = this.runIterationWithErrorHandling(task);
       this.activeIteration = iterationPromise;
       let result: IterationResult;

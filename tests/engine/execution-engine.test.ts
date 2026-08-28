@@ -1236,15 +1236,76 @@ describe('ExecutionEngine', () => {
       await startPromise;
     });
 
+    test('preserves a pause requested during task selection', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 20 })
+      );
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'watch-paused-selection-task' });
+      let getNextTaskCalls = 0;
+      let releaseSelection!: (task: TrackerTask) => void;
+      const pendingSelection = new Promise<TrackerTask>((resolve) => {
+        releaseSelection = resolve;
+      });
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() => {
+        getNextTaskCalls++;
+        return getNextTaskCalls === 1
+          ? Promise.resolve(undefined as TrackerTask | undefined)
+          : pendingSelection;
+      });
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (events.every((event) => event.type !== 'engine:waiting')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.pause();
+      while (events.every((event) => event.type !== 'engine:paused')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.resume();
+      while (getNextTaskCalls < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.pause();
+      expect(engine.getStatus()).toBe('pausing');
+      releaseSelection(task);
+
+      while (events.filter((event) => event.type === 'engine:paused').length < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(
+        events.filter(
+          (event) => event.type === 'iteration:started' && event.task.id === task.id
+        )
+      ).toHaveLength(1);
+      expect(engine.getStatus()).toBe('paused');
+      engine.stop();
+      await startPromise;
+    });
+
     test('cuts a poll wait short when paused', async () => {
       engine = new ExecutionEngine(
         createTestConfig({ watch: true, pollIntervalMs: 1000 })
       );
       engine.on((event) => events.push(event));
 
-      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
-        Promise.resolve([])
-      );
+      let getTasksCalls = 0;
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() => {
+        getTasksCalls++;
+        return Promise.resolve([]);
+      });
       (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
         Promise.resolve(false)
       );
@@ -1278,6 +1339,7 @@ describe('ExecutionEngine', () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
+      const getTasksCallsWhileWaiting = getTasksCalls;
       engine.pause();
       releasePollDelay();
 
@@ -1286,6 +1348,7 @@ describe('ExecutionEngine', () => {
       }
 
       expect(delayCalls).toEqual([100, 100]);
+      expect(getTasksCalls).toBe(getTasksCallsWhileWaiting);
       (engine as unknown as {
         delay: (ms: number) => Promise<void>;
       }).delay = originalDelay;
