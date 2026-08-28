@@ -619,6 +619,7 @@ export class ExecutionEngine {
           timestamp: new Date().toISOString(),
           fromIteration: this.state.currentIteration,
         });
+        this.watchingIdle = false;
       }
 
       // Attempt primary agent recovery at the start of each iteration
