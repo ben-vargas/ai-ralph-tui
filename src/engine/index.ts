@@ -79,6 +79,21 @@ const PRIMARY_RECOVERY_TEST_TIMEOUT_MS = 5000;
 const ACTIVE_ITERATION_DRAIN_TIMEOUT_MS = 30000;
 
 /**
+ * Poll interval for verifying task resets after a timed-out drain.
+ */
+const TIMED_OUT_RESET_VERIFICATION_INTERVAL_MS = 500;
+
+/**
+ * Maximum time to verify task resets after a timed-out drain.
+ */
+const TIMED_OUT_RESET_VERIFICATION_TIMEOUT_MS = 5000;
+
+/**
+ * Maximum corrective writes for a task that remains in progress.
+ */
+const TIMED_OUT_RESET_MAX_CORRECTIVE_WRITES = 2;
+
+/**
  * Minimal test prompt for checking rate limit status.
  * Kept simple to minimize token usage and allow fast response.
  */
@@ -252,6 +267,7 @@ export class ExecutionEngine {
   private shouldStop = false;
   private activeIteration: Promise<IterationResult> | null = null;
   private stopPromise: Promise<void> | null = null;
+  private drainTimedOut = false;
   /** Track retry attempts per task */
   private retryCountMap: Map<string, number> = new Map();
   /** Track skipped tasks to avoid retrying them */
@@ -520,6 +536,7 @@ export class ExecutionEngine {
     this.state.startedAt = new Date().toISOString();
     this.shouldStop = false;
     this.stopPromise = null;
+    this.drainTimedOut = false;
 
     // Fetch all tasks including completed for TUI display
     // Open/in_progress tasks are actionable; completed tasks are for historical view
@@ -1523,16 +1540,16 @@ export class ExecutionEngine {
   /**
    * Stop the execution loop.
    */
-  async stop(): Promise<void> {
+  async stop(timeoutMs = ACTIVE_ITERATION_DRAIN_TIMEOUT_MS): Promise<void> {
     if (this.stopPromise) {
       return this.stopPromise;
     }
 
-    this.stopPromise = this.stopInternal();
+    this.stopPromise = this.stopInternal(timeoutMs);
     return this.stopPromise;
   }
 
-  private async stopInternal(): Promise<void> {
+  private async stopInternal(timeoutMs: number): Promise<void> {
     this.shouldStop = true;
     this.state.status = 'stopping';
 
@@ -1541,7 +1558,7 @@ export class ExecutionEngine {
       this.currentExecution.interrupt();
     }
 
-    await this.waitForActiveIteration();
+    this.drainTimedOut = !(await this.waitForActiveIteration(timeoutMs));
 
     // Update session status
     await updateSessionStatus(this.config.cwd, 'interrupted');
@@ -1713,6 +1730,7 @@ export class ExecutionEngine {
     this.state.status = 'running';
     this.shouldStop = false;
     this.stopPromise = null;
+    this.drainTimedOut = false;
 
     // Emit resumed event
     this.emit({
@@ -1783,7 +1801,13 @@ export class ExecutionEngine {
    * @param taskIds - Array of task IDs to reset to open
    * @returns Number of tasks successfully reset
    */
-  async resetTasksToOpen(taskIds: string[]): Promise<number> {
+  async resetTasksToOpen(
+    taskIds: string[],
+    verificationOptions: {
+      intervalMs?: number;
+      timeoutMs?: number;
+    } = {}
+  ): Promise<number> {
     if (!this.tracker || taskIds.length === 0) {
       return 0;
     }
@@ -1793,6 +1817,9 @@ export class ExecutionEngine {
       try {
         await this.tracker.updateTaskStatus(taskId, 'open');
         resetCount++;
+        if (this.drainTimedOut) {
+          await this.verifyTimedOutTaskReset(taskId, verificationOptions);
+        }
       } catch {
         // Silently continue on individual task reset failures
         // The task may have been deleted or modified externally
@@ -1800,6 +1827,54 @@ export class ExecutionEngine {
     }
 
     return resetCount;
+  }
+
+  private async verifyTimedOutTaskReset(
+    taskId: string,
+    options: {
+      intervalMs?: number;
+      timeoutMs?: number;
+    }
+  ): Promise<void> {
+    const intervalMs =
+      options.intervalMs ?? TIMED_OUT_RESET_VERIFICATION_INTERVAL_MS;
+    const timeoutMs =
+      options.timeoutMs ?? TIMED_OUT_RESET_VERIFICATION_TIMEOUT_MS;
+    const deadline = Date.now() + timeoutMs;
+    let correctiveWrites = 0;
+
+    while (Date.now() < deadline) {
+      const remainingMs = deadline - Date.now();
+      await this.delay(Math.min(intervalMs, remainingMs));
+
+      let task: TrackerTask | undefined;
+      try {
+        task = await this.tracker!.getTask(taskId);
+      } catch {
+        return;
+      }
+
+      if (!task || task.status !== 'in_progress') {
+        return;
+      }
+
+      if (correctiveWrites >= TIMED_OUT_RESET_MAX_CORRECTIVE_WRITES) {
+        return;
+      }
+
+      try {
+        await this.tracker!.updateTaskStatus(taskId, 'open');
+        correctiveWrites++;
+        this.emit({
+          type: 'engine:warning',
+          timestamp: new Date().toISOString(),
+          code: 'task-reset-race',
+          message: `Task '${taskId}' was restored to open after a late in-progress update`,
+        });
+      } catch {
+        return;
+      }
+    }
   }
 
   /**

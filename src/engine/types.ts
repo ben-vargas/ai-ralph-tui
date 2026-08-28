@@ -308,7 +308,7 @@ export interface EngineResumedEvent extends EngineEventBase {
 export interface EngineWarningEvent extends EngineEventBase {
   type: 'engine:warning';
   /** Warning code for programmatic handling */
-  code: 'sandbox-network-conflict';
+  code: 'sandbox-network-conflict' | 'task-reset-race';
   /** Human-readable warning message */
   message: string;
 }
