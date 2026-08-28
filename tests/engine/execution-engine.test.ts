@@ -1197,6 +1197,45 @@ describe('ExecutionEngine', () => {
       await startPromise;
     });
 
+    test('restores waiting status after resuming while idle', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 20 })
+      );
+      engine.on((event) => events.push(event));
+
+      let getNextTaskCalls = 0;
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() => {
+        getNextTaskCalls++;
+        return Promise.resolve(undefined as TrackerTask | undefined);
+      });
+
+      await engine.initialize();
+      const startPromise = engine.start();
+      while (events.every((event) => event.type !== 'engine:waiting')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.pause();
+      while (events.every((event) => event.type !== 'engine:paused')) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      engine.resume();
+      while (getNextTaskCalls < 2 || engine.getStatus() !== 'waiting') {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(engine.getStatus()).toBe('waiting');
+      engine.stop();
+      await startPromise;
+    });
+
     test('cuts a poll wait short when paused', async () => {
       engine = new ExecutionEngine(
         createTestConfig({ watch: true, pollIntervalMs: 1000 })

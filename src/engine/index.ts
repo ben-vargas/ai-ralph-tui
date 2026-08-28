@@ -630,13 +630,15 @@ export class ExecutionEngine {
         if (this.config.watch && !this.forcedTask && !this.shouldStop) {
           if (!this.watchingIdle) {
             this.watchingIdle = true;
-            this.state.status = 'waiting';
             this.emit({
               type: 'engine:waiting',
               timestamp: new Date().toISOString(),
               reason: 'completed',
               pollIntervalMs: this.config.pollIntervalMs,
             });
+          }
+          if (this.state.status === 'running') {
+            this.state.status = 'waiting';
           }
           await this.waitForPollInterval();
           if (this.shouldStop) {
@@ -672,13 +674,15 @@ export class ExecutionEngine {
         if (this.config.watch && !this.forcedTask && !this.shouldStop) {
           if (!this.watchingIdle) {
             this.watchingIdle = true;
-            this.state.status = 'waiting';
             this.emit({
               type: 'engine:waiting',
               timestamp: new Date().toISOString(),
               reason: 'no_tasks',
               pollIntervalMs: this.config.pollIntervalMs,
             });
+          }
+          if (this.state.status === 'running') {
+            this.state.status = 'waiting';
           }
           await this.waitForPollInterval();
           if (this.shouldStop) {
