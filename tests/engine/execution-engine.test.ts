@@ -5,6 +5,9 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { ExecutionEngine } from '../../src/engine/index.js';
 import type {
   EngineEvent,
@@ -1169,6 +1172,87 @@ describe('ExecutionEngine', () => {
       (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
         Promise.resolve(undefined as TrackerTask | undefined)
       );
+    });
+
+    test('does not watch after completing a forced worker task', async () => {
+      const testCwd = await mkdtemp(join(tmpdir(), 'ralph-engine-watch-'));
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, maxIterations: 10, cwd: testCwd })
+      );
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'worker-watch-task' });
+      const originalExecute = mockAgentInstance.execute;
+      mockAgentInstance.execute = mock(() => {
+        const result = createSuccessfulExecution('<promise>COMPLETE</promise>');
+        return {
+          executionId: result.executionId,
+          promise: Promise.resolve(result),
+          interrupt: mock(() => {}),
+          isRunning: () => false,
+        };
+      }) as AgentPlugin['execute'];
+
+      try {
+        await engine.initialize({
+          tracker: mockTrackerInstance as TrackerPlugin,
+          forcedTask: task,
+        });
+        await engine.start();
+      } finally {
+        mockAgentInstance.execute = originalExecute;
+        await rm(testCwd, { recursive: true, force: true });
+      }
+
+      expect(
+        events.filter(
+          (event) => event.type === 'engine:stopped' && event.reason === 'completed'
+        )
+      ).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'engine:waiting')).toHaveLength(0);
+    });
+
+    test('continues watching after a task refresh failure', async () => {
+      engine = new ExecutionEngine(
+        createTestConfig({ watch: true, pollIntervalMs: 20, maxIterations: 1 })
+      );
+      engine.on((event) => events.push(event));
+
+      const task = createTrackerTask({ id: 'watch-refresh-task' });
+      let taskAvailable = false;
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve([])
+      );
+      (mockTrackerInstance.isComplete as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(false)
+      );
+      (mockTrackerInstance.getNextTask as ReturnType<typeof mock>).mockImplementation(() =>
+        Promise.resolve(taskAvailable ? task : undefined)
+      );
+
+      await engine.initialize();
+      (mockTrackerInstance.getTasks as ReturnType<typeof mock>)
+        .mockImplementationOnce(() => Promise.resolve([]))
+        .mockImplementationOnce(() => Promise.reject(new Error('temporary tracker failure')))
+        .mockImplementation(async () => {
+          taskAvailable = true;
+          return [task];
+        });
+
+      await engine.start();
+
+      expect(
+        events.filter(
+          (event) =>
+            event.type === 'engine:warning' &&
+            event.code === 'task-refresh-failed' &&
+            event.message.includes('temporary tracker failure')
+        )
+      ).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'engine:waiting')).toHaveLength(1);
+      expect(
+        events.filter((event) => event.type === 'iteration:started' && event.task.id === task.id)
+      ).toHaveLength(1);
     });
 
     test('waits after completion and resumes when new work appears', async () => {

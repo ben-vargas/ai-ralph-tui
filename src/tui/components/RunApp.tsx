@@ -1808,7 +1808,7 @@ export function RunApp({
           break;
 
         case 'engine:waiting':
-          setStatus('idle');
+          setStatus('waiting');
           break;
 
         case 'engine:paused':
@@ -2423,7 +2423,7 @@ export function RunApp({
             }
           } else if (engine) {
             // Local engine control (engine absent in parallel mode)
-            if (status === 'running' || status === 'executing' || status === 'selecting') {
+            if (status === 'running' || status === 'executing' || status === 'selecting' || status === 'waiting') {
               engine.pause();
               setStatus('pausing');
             } else if (status === 'pausing') {

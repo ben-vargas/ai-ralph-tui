@@ -451,6 +451,16 @@ export class ExecutionEngine {
     });
   }
 
+  private emitTaskRefreshWarning(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.emit({
+      type: 'engine:warning',
+      timestamp: new Date().toISOString(),
+      code: 'task-refresh-failed',
+      message: `Task refresh failed while watching: ${message}`,
+    });
+  }
+
   /**
    * Generate a preview of the prompt that would be sent to the agent for a given task.
    * Useful for debugging and understanding what the agent will receive.
@@ -617,7 +627,7 @@ export class ExecutionEngine {
         ? this.state.tasksCompleted >= 1
         : await this.tracker!.isComplete();
       if (isComplete) {
-        if (this.config.watch && !this.shouldStop) {
+        if (this.config.watch && !this.forcedTask && !this.shouldStop) {
           if (!this.watchingIdle) {
             this.watchingIdle = true;
             this.emit({
@@ -631,7 +641,11 @@ export class ExecutionEngine {
           if (this.shouldStop) {
             break;
           }
-          await this.refreshTasks();
+          try {
+            await this.refreshTasks();
+          } catch (error) {
+            this.emitTaskRefreshWarning(error);
+          }
           continue;
         }
 
@@ -654,7 +668,7 @@ export class ExecutionEngine {
       // Get next task (excluding skipped tasks)
       const task = await this.getNextAvailableTask();
       if (!task) {
-        if (this.config.watch && !this.shouldStop) {
+        if (this.config.watch && !this.forcedTask && !this.shouldStop) {
           if (!this.watchingIdle) {
             this.watchingIdle = true;
             this.emit({
@@ -668,7 +682,11 @@ export class ExecutionEngine {
           if (this.shouldStop) {
             break;
           }
-          await this.refreshTasks();
+          try {
+            await this.refreshTasks();
+          } catch (error) {
+            this.emitTaskRefreshWarning(error);
+          }
           continue;
         }
 
