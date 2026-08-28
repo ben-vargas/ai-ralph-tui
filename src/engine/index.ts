@@ -74,6 +74,11 @@ const PROMISE_COMPLETE_PATTERN = /<promise>\s*COMPLETE\s*<\/promise>/i;
 const PRIMARY_RECOVERY_TEST_TIMEOUT_MS = 5000;
 
 /**
+ * Maximum time to wait for an interrupted iteration to unwind.
+ */
+const ACTIVE_ITERATION_DRAIN_TIMEOUT_MS = 30000;
+
+/**
  * Minimal test prompt for checking rate limit status.
  * Kept simple to minimize token usage and allow fast response.
  */
@@ -245,6 +250,8 @@ export class ExecutionEngine {
   private state: EngineState;
   private currentExecution: AgentExecutionHandle | null = null;
   private shouldStop = false;
+  private activeIteration: Promise<IterationResult> | null = null;
+  private stopPromise: Promise<void> | null = null;
   /** Track retry attempts per task */
   private retryCountMap: Map<string, number> = new Map();
   /** Track skipped tasks to avoid retrying them */
@@ -512,6 +519,7 @@ export class ExecutionEngine {
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
     this.shouldStop = false;
+    this.stopPromise = null;
 
     // Fetch all tasks including completed for TUI display
     // Open/in_progress tasks are actionable; completed tasks are for historical view
@@ -637,7 +645,16 @@ export class ExecutionEngine {
       }
 
       // Run iteration with error handling
-      const result = await this.runIterationWithErrorHandling(task);
+      const iterationPromise = this.runIterationWithErrorHandling(task);
+      this.activeIteration = iterationPromise;
+      let result: IterationResult;
+      try {
+        result = await iterationPromise;
+      } finally {
+        if (this.activeIteration === iterationPromise) {
+          this.activeIteration = null;
+        }
+      }
 
       // Check if we should abort
       if (result.status === 'failed' && this.config.errorHandling.strategy === 'abort') {
@@ -1475,9 +1492,47 @@ export class ExecutionEngine {
   }
 
   /**
-   * Stop the execution loop
+   * Wait for the active iteration to finish, up to the supplied timeout.
+   */
+  async waitForActiveIteration(timeoutMs = ACTIVE_ITERATION_DRAIN_TIMEOUT_MS): Promise<boolean> {
+    const activeIteration = this.activeIteration;
+    if (!activeIteration) {
+      return true;
+    }
+
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<boolean>((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(false), timeoutMs);
+    });
+
+    try {
+      return await Promise.race([
+        activeIteration.then(
+          () => true,
+          () => true
+        ),
+        timeoutPromise,
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
+  /**
+   * Stop the execution loop.
    */
   async stop(): Promise<void> {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+
+    this.stopPromise = this.stopInternal();
+    return this.stopPromise;
+  }
+
+  private async stopInternal(): Promise<void> {
     this.shouldStop = true;
     this.state.status = 'stopping';
 
@@ -1485,6 +1540,8 @@ export class ExecutionEngine {
     if (this.currentExecution) {
       this.currentExecution.interrupt();
     }
+
+    await this.waitForActiveIteration();
 
     // Update session status
     await updateSessionStatus(this.config.cwd, 'interrupted');
@@ -1655,6 +1712,7 @@ export class ExecutionEngine {
 
     this.state.status = 'running';
     this.shouldStop = false;
+    this.stopPromise = null;
 
     // Emit resumed event
     this.emit({

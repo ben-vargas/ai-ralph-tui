@@ -445,7 +445,18 @@ describe('RemoteServer', () => {
     test('resets the active task to open after interrupt succeeds', async () => {
       const { RemoteServer } = await import('../../src/remote/server.js');
 
-      const stop = mock(() => Promise.resolve());
+      let currentTask: {
+        id: string;
+        title: string;
+        status: 'in_progress';
+      } | null = {
+        id: 'task-123',
+        title: 'Task 123',
+        status: 'in_progress',
+      };
+      const stop = mock(async () => {
+        currentTask = null;
+      });
       const resetTasksToOpen = mock(() => Promise.resolve(1));
       const on = mock(() => () => {});
       const mockEngine = {
@@ -453,11 +464,7 @@ describe('RemoteServer', () => {
         stop,
         resetTasksToOpen,
         getState: () => ({
-          currentTask: {
-            id: 'task-123',
-            title: 'Task 123',
-            status: 'in_progress',
-          },
+          currentTask,
         }),
       };
 
