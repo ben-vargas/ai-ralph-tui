@@ -2272,7 +2272,7 @@ async function runWithTui(
 
     shutdownPromise = (async () => {
       const status = engine.getStatus();
-      if (status === 'running' || status === 'pausing' || status === 'paused' || status === 'stopping') {
+      if (status === 'running' || status === 'waiting' || status === 'pausing' || status === 'paused' || status === 'stopping') {
         try {
           await engine.stop();
         } catch {
