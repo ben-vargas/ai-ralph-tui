@@ -658,9 +658,15 @@ export class ExecutionEngine {
               pollIntervalMs: this.config.pollIntervalMs,
             });
           }
+          if (this.state.status === 'running') {
+            this.state.status = 'waiting';
+          }
           await this.waitForPollInterval();
           if (this.shouldStop) {
             break;
+          }
+          if (this.getStatus() === 'pausing') {
+            continue;
           }
           try {
             await this.refreshTasks();
@@ -699,9 +705,15 @@ export class ExecutionEngine {
               pollIntervalMs: this.config.pollIntervalMs,
             });
           }
+          if (this.state.status === 'running') {
+            this.state.status = 'waiting';
+          }
           await this.waitForPollInterval();
           if (this.shouldStop) {
             break;
+          }
+          if (this.getStatus() === 'pausing') {
+            continue;
           }
           try {
             await this.refreshTasks();
@@ -723,6 +735,9 @@ export class ExecutionEngine {
 
       // Run iteration with error handling
       this.watchingIdle = false;
+      if (this.state.status === 'waiting') {
+        this.state.status = 'running';
+      }
       const iterationPromise = this.runIterationWithErrorHandling(task);
       this.activeIteration = iterationPromise;
       let result: IterationResult;
@@ -1650,7 +1665,7 @@ export class ExecutionEngine {
    * If already pausing or paused, this is a no-op.
    */
   pause(): void {
-    if (this.state.status !== 'running') {
+    if (this.state.status !== 'running' && this.state.status !== 'waiting') {
       return;
     }
 
@@ -1845,7 +1860,7 @@ export class ExecutionEngine {
    */
   private async waitForPollInterval(): Promise<void> {
     let remainingMs = this.config.pollIntervalMs;
-    while (remainingMs > 0 && !this.shouldStop) {
+    while (remainingMs > 0 && !this.shouldStop && this.state.status !== 'pausing') {
       const delayMs = Math.min(100, remainingMs);
       await this.delay(delayMs);
       remainingMs -= delayMs;
