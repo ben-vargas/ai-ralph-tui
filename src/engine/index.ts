@@ -270,6 +270,7 @@ export class ExecutionEngine {
   private drainTimedOut = false;
   private activeIterationSettled = true;
   private timedOutIteration: Promise<IterationResult> | null = null;
+  private watchingIdle = false;
   /** Track retry attempts per task */
   private retryCountMap: Map<string, number> = new Map();
   /** Track skipped tasks to avoid retrying them */
@@ -468,6 +469,16 @@ export class ExecutionEngine {
     });
   }
 
+  private emitTaskRefreshWarning(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.emit({
+      type: 'engine:warning',
+      timestamp: new Date().toISOString(),
+      code: 'task-refresh-failed',
+      message: `Task refresh failed while watching: ${message}`,
+    });
+  }
+
   /**
    * Generate a preview of the prompt that would be sent to the agent for a given task.
    * Useful for debugging and understanding what the agent will receive.
@@ -541,6 +552,7 @@ export class ExecutionEngine {
     this.drainTimedOut = false;
     this.activeIterationSettled = true;
     this.timedOutIteration = null;
+    this.watchingIdle = false;
 
     // Fetch all tasks including completed for TUI display
     // Open/in_progress tasks are actionable; completed tasks are for historical view
@@ -636,6 +648,28 @@ export class ExecutionEngine {
         ? this.state.tasksCompleted >= 1
         : await this.tracker!.isComplete();
       if (isComplete) {
+        if (this.config.watch && !this.forcedTask && !this.shouldStop) {
+          if (!this.watchingIdle) {
+            this.watchingIdle = true;
+            this.emit({
+              type: 'engine:waiting',
+              timestamp: new Date().toISOString(),
+              reason: 'completed',
+              pollIntervalMs: this.config.pollIntervalMs,
+            });
+          }
+          await this.waitForPollInterval();
+          if (this.shouldStop) {
+            break;
+          }
+          try {
+            await this.refreshTasks();
+          } catch (error) {
+            this.emitTaskRefreshWarning(error);
+          }
+          continue;
+        }
+
         this.emit({
           type: 'all:complete',
           timestamp: new Date().toISOString(),
@@ -655,6 +689,28 @@ export class ExecutionEngine {
       // Get next task (excluding skipped tasks)
       const task = await this.getNextAvailableTask();
       if (!task) {
+        if (this.config.watch && !this.forcedTask && !this.shouldStop) {
+          if (!this.watchingIdle) {
+            this.watchingIdle = true;
+            this.emit({
+              type: 'engine:waiting',
+              timestamp: new Date().toISOString(),
+              reason: 'no_tasks',
+              pollIntervalMs: this.config.pollIntervalMs,
+            });
+          }
+          await this.waitForPollInterval();
+          if (this.shouldStop) {
+            break;
+          }
+          try {
+            await this.refreshTasks();
+          } catch (error) {
+            this.emitTaskRefreshWarning(error);
+          }
+          continue;
+        }
+
         this.emit({
           type: 'engine:stopped',
           timestamp: new Date().toISOString(),
@@ -666,6 +722,7 @@ export class ExecutionEngine {
       }
 
       // Run iteration with error handling
+      this.watchingIdle = false;
       const iterationPromise = this.runIterationWithErrorHandling(task);
       this.activeIteration = iterationPromise;
       let result: IterationResult;
@@ -1749,6 +1806,7 @@ export class ExecutionEngine {
     this.drainTimedOut = false;
     this.activeIterationSettled = true;
     this.timedOutIteration = null;
+    this.watchingIdle = false;
 
     // Emit resumed event
     this.emit({
@@ -1780,6 +1838,18 @@ export class ExecutionEngine {
    */
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Wait for the configured watch interval without blocking shutdown.
+   */
+  private async waitForPollInterval(): Promise<void> {
+    let remainingMs = this.config.pollIntervalMs;
+    while (remainingMs > 0 && !this.shouldStop) {
+      const delayMs = Math.min(100, remainingMs);
+      await this.delay(delayMs);
+      remainingMs -= delayMs;
+    }
   }
 
   /**

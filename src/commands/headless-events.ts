@@ -156,6 +156,10 @@ export function createHeadlessEventHandler(
         logger.engineStopped(event.reason, event.totalIterations, event.tasksCompleted);
         break;
 
+      case 'engine:waiting':
+        logger.engineWaiting(event.reason, event.pollIntervalMs);
+        break;
+
       case 'all:complete':
         logger.allComplete(event.totalCompleted, event.totalIterations);
         break;

@@ -1014,6 +1014,12 @@ export function RunApp({
         case 'engine:stopped':
           setRemoteStatus(event.reason === 'completed' ? 'complete' : 'ready');
           break;
+        case 'engine:waiting':
+          setRemoteCurrentTaskId(undefined);
+          setRemoteCurrentTaskTitle(undefined);
+          remoteCurrentTaskIdRef.current = undefined;
+          setRemoteStatus('waiting');
+          break;
         case 'engine:paused':
           setRemoteStatus('paused');
           break;
@@ -1807,6 +1813,13 @@ export function RunApp({
           }
           break;
 
+        case 'engine:waiting':
+          setCurrentTaskId(undefined);
+          setCurrentTaskTitle(undefined);
+          currentTaskIdRef.current = undefined;
+          setStatus('waiting');
+          break;
+
         case 'engine:paused':
           setStatus('paused');
           break;
@@ -2392,7 +2405,7 @@ export function RunApp({
           // When paused, resume will transition back to selecting
           if (isViewingRemote && instanceManager) {
             // Route to remote instance
-            if (displayStatus === 'running' || displayStatus === 'executing' || displayStatus === 'selecting') {
+            if (displayStatus === 'running' || displayStatus === 'executing' || displayStatus === 'selecting' || displayStatus === 'waiting') {
               // Set status to 'pausing' immediately for feedback
               setRemoteStatus('pausing');
               instanceManager.sendRemoteCommand('pause');
@@ -2419,7 +2432,7 @@ export function RunApp({
             }
           } else if (engine) {
             // Local engine control (engine absent in parallel mode)
-            if (status === 'running' || status === 'executing' || status === 'selecting') {
+            if (status === 'running' || status === 'executing' || status === 'selecting' || status === 'waiting') {
               engine.pause();
               setStatus('pausing');
             } else if (status === 'pausing') {

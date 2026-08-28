@@ -356,6 +356,25 @@ describe('initializeAndReportPluginLoadFailures', () => {
 });
 
 describe('parseRunArgs', () => {
+  describe('--watch/--poll parsing', () => {
+    test('parses --watch', () => {
+      expect(parseRunArgs(['--watch']).watch).toBe(true);
+    });
+
+    test('parses --poll in seconds and implies watch mode', () => {
+      const result = parseRunArgs(['--poll', '5']);
+
+      expect(result.pollIntervalMs).toBe(5000);
+      expect(result.watch).toBe(true);
+    });
+
+    test('rejects non-positive and non-numeric poll values', () => {
+      expect(parseRunArgs(['--poll', '0']).pollIntervalMs).toBeUndefined();
+      expect(parseRunArgs(['--poll', '-1']).pollIntervalMs).toBeUndefined();
+      expect(parseRunArgs(['--poll', 'invalid']).pollIntervalMs).toBeUndefined();
+    });
+  });
+
   describe('--epic/--epics parsing', () => {
     test('preserves single-epic compatibility', () => {
       const result = parseRunArgs(['--epic', 'ui-epic']);
