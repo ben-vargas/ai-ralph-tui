@@ -119,6 +119,9 @@ describe('ExecutionEngine', () => {
   beforeEach(() => {
     // Reset all mocks
     mock.restore();
+    (mockTrackerInstance.updateTaskStatus as ReturnType<typeof mock>).mockImplementation(() =>
+      Promise.resolve()
+    );
     events = [];
     config = createTestConfig();
   });
