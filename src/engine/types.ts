@@ -684,7 +684,7 @@ export type EngineEventListener = (event: EngineEvent) => void;
  * - 'paused': Paused, waiting to resume
  * - 'stopping': Stop requested, shutting down
  */
-export type EngineStatus = 'idle' | 'running' | 'pausing' | 'paused' | 'stopping';
+export type EngineStatus = 'idle' | 'running' | 'waiting' | 'pausing' | 'paused' | 'stopping';
 
 /**
  * Engine state snapshot
