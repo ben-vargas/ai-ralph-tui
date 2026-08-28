@@ -121,7 +121,7 @@ export const colors: ThemeColors = new Proxy({} as ThemeColors, {
 /**
  * Status indicator symbols
  * Task status: ✓ (done), ▶ (active/running), ○ (actionable/pending), ⊘ (blocked), ✗ (error), ✓ (closed - greyed)
- * Ralph status: ▶ (running), ◎ (pausing), ⏸ (paused), ■ (stopped), ✓ (complete), ○ (idle/ready)
+ * Ralph status: ▶ (running), ◎ (pausing), ⏸ (paused), ■ (stopped), ✓ (complete), ○ (idle), ◉ (ready), ◌ (waiting)
  */
 export const statusIndicators = {
   done: '✓',
@@ -140,6 +140,7 @@ export const statusIndicators = {
   stopped: '■',
   complete: '✓',
   idle: '○',
+  waiting: '◌',
   ready: '◉', // Ready to start - waiting for user action
   // Parallel execution indicators
   merging: '⟳', // Merge in progress
@@ -261,9 +262,10 @@ export const layout = {
  * - 'stopped': Not running (generic)
  * - 'complete': All tasks finished successfully
  * - 'idle': Stopped, no more tasks available
+ * - 'waiting': Watching for new tasks while the engine remains active
  * - 'error': Stopped due to error
  */
-export type RalphStatus = 'ready' | 'running' | 'selecting' | 'executing' | 'pausing' | 'paused' | 'stopped' | 'complete' | 'idle' | 'error';
+export type RalphStatus = 'ready' | 'running' | 'selecting' | 'executing' | 'pausing' | 'paused' | 'stopped' | 'complete' | 'idle' | 'waiting' | 'error';
 
 /**
  * Task status types matching the acceptance criteria

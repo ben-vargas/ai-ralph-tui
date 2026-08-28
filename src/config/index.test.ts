@@ -19,6 +19,7 @@ import {
   buildConfig,
   CONFIG_PATHS,
 } from './index.js';
+import { DEFAULT_CONFIG } from './types.js';
 import type { StoredConfig, RalphConfig } from './types.js';
 import { registerBuiltinAgents } from '../plugins/agents/builtin/index.js';
 import { registerBuiltinTrackers } from '../plugins/trackers/builtin/index.js';
@@ -650,6 +651,8 @@ describe('validateConfig', () => {
       tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -673,6 +676,8 @@ describe('validateConfig', () => {
       tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -696,6 +701,8 @@ describe('validateConfig', () => {
       tracker: { name: 'unknown', plugin: 'nonexistent-tracker', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -719,6 +726,8 @@ describe('validateConfig', () => {
       tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
       maxIterations: -1,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -742,6 +751,8 @@ describe('validateConfig', () => {
       tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
       maxIterations: 10,
       iterationDelay: -1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -759,12 +770,35 @@ describe('validateConfig', () => {
     expect(result.errors.some((e) => e.includes('delay'))).toBe(true);
   });
 
+  test('reports error for non-positive poll interval', async () => {
+    const config: RalphConfig = {
+      ...DEFAULT_CONFIG,
+      agent: { name: 'claude', plugin: 'claude', options: {} },
+      tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
+      pollIntervalMs: 0,
+      showTui: false,
+      errorHandling: {
+        strategy: 'skip',
+        maxRetries: 3,
+        retryDelayMs: 5000,
+        continueOnNonZeroExit: false,
+      },
+    };
+
+    const result = await validateConfig(config);
+
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.includes('Poll interval'))).toBe(true);
+  });
+
   test('warns about missing epic ID for beads tracker in TUI mode', async () => {
     const config: RalphConfig = {
       agent: { name: 'claude', plugin: 'claude', options: {} },
       tracker: { name: 'beads-bv', plugin: 'beads-bv', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -789,6 +823,8 @@ describe('validateConfig', () => {
       tracker: { name: 'beads-rust', plugin: 'beads-rust', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -813,6 +849,8 @@ describe('validateConfig', () => {
       tracker: { name: 'beads', plugin: 'beads', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -837,6 +875,8 @@ describe('validateConfig', () => {
       tracker: { name: 'json', plugin: 'json', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -861,6 +901,8 @@ describe('validateConfig', () => {
       tracker: { name: 'linear', plugin: 'linear', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -885,6 +927,8 @@ describe('validateConfig', () => {
       tracker: { name: 'linear', plugin: 'linear', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -909,6 +953,8 @@ describe('validateConfig', () => {
       tracker: { name: 'linear', plugin: 'linear', options: {} },
       maxIterations: 10,
       iterationDelay: 1000,
+      watch: false,
+      pollIntervalMs: 30000,
       cwd: process.cwd(),
       outputDir: '.ralph-tui/iterations',
       progressFile: '.ralph-tui/progress.md',
@@ -1031,6 +1077,26 @@ tracker = "beads-rust"
     expect(config!.epicIds).toEqual(['ui-epic', 'backend-epic']);
     expect(config!.tracker.options?.epicId).toBe('ui-epic');
     expect(config!.tracker.options?.epicIds).toEqual(['ui-epic', 'backend-epic']);
+  });
+
+  test('builds watch configuration from runtime options', async () => {
+    const config = await buildConfig({
+      cwd: tempDir,
+      watch: true,
+      pollIntervalMs: 5000,
+    });
+
+    expect(config).not.toBeNull();
+    expect(config!.watch).toBe(true);
+    expect(config!.pollIntervalMs).toBe(5000);
+  });
+
+  test('uses default watch polling configuration', async () => {
+    const config = await buildConfig({ cwd: tempDir });
+
+    expect(config).not.toBeNull();
+    expect(config!.watch).toBe(false);
+    expect(config!.pollIntervalMs).toBe(30000);
   });
 });
 

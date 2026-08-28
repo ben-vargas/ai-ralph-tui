@@ -198,6 +198,7 @@ export interface IterationResult {
 export type EngineEventType =
   | 'engine:started'
   | 'engine:stopped'
+  | 'engine:waiting'
   | 'engine:paused'
   | 'engine:resumed'
   | 'engine:warning'
@@ -285,6 +286,17 @@ export interface EngineStoppedEvent extends EngineEventBase {
 }
 
 /**
+ * Engine waiting event - emitted when watch mode enters an idle state.
+ */
+export interface EngineWaitingEvent extends EngineEventBase {
+  type: 'engine:waiting';
+  /** Why the engine became idle */
+  reason: 'no_tasks' | 'completed';
+  /** Polling interval in milliseconds */
+  pollIntervalMs: number;
+}
+
+/**
  * Engine paused event
  */
 export interface EnginePausedEvent extends EngineEventBase {
@@ -308,7 +320,7 @@ export interface EngineResumedEvent extends EngineEventBase {
 export interface EngineWarningEvent extends EngineEventBase {
   type: 'engine:warning';
   /** Warning code for programmatic handling */
-  code: 'sandbox-network-conflict';
+  code: 'sandbox-network-conflict' | 'task-refresh-failed';
   /** Human-readable warning message */
   message: string;
 }
@@ -632,6 +644,7 @@ export interface TasksRefreshedEvent extends EngineEventBase {
 export type EngineEvent =
   | EngineStartedEvent
   | EngineStoppedEvent
+  | EngineWaitingEvent
   | EnginePausedEvent
   | EngineResumedEvent
   | EngineWarningEvent
