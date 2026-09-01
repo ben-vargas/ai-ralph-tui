@@ -2062,6 +2062,7 @@ function RunAppWrapper({
         setShowInterruptDialog(false);
         interruptHandler.reset();
       }}
+      onInterruptRequest={() => interruptHandler.handleSigint()}
       initialTasks={tasks}
       onStart={onStart}
       storedConfig={storedConfig}
@@ -2169,6 +2170,9 @@ async function runWithTui(
 
   const renderer = await createCliRenderer({
     exitOnCtrlC: false, // We handle this ourselves
+    // SIGINT/SIGTERM belong to the app's interrupt/graceful-shutdown handler.
+    // Retain OpenTUI handling for SIGQUIT/SIGABRT to restore the terminal.
+    exitSignals: ['SIGQUIT', 'SIGABRT'],
   });
 
   const root = createRoot(renderer);
@@ -2471,6 +2475,9 @@ async function runRemoteOnlyTui(args: {
 
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
+    // SIGINT/SIGTERM belong to the app's interrupt/graceful-shutdown handler.
+    // Retain OpenTUI handling for SIGQUIT/SIGABRT to restore the terminal.
+    exitSignals: ['SIGQUIT', 'SIGABRT'],
   });
 
   const root = createRoot(renderer);
@@ -2704,6 +2711,9 @@ async function runParallelWithTui(
 
   const renderer = await createCliRenderer({
     exitOnCtrlC: false,
+    // SIGINT/SIGTERM belong to the app's interrupt/graceful-shutdown handler.
+    // Retain OpenTUI handling for SIGQUIT/SIGABRT to restore the terminal.
+    exitSignals: ['SIGQUIT', 'SIGABRT'],
   });
 
   const root = createRoot(renderer);
