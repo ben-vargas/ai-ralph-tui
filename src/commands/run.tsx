@@ -2163,7 +2163,10 @@ async function runWithTui(
   let showDialogCallback: (() => void) | null = null;
   let hideDialogCallback: (() => void) | null = null;
   let cancelledCallback: (() => void) | null = null;
-  let resolveQuitPromise: (() => void) | null = null;
+  let resolveQuitPromise: () => void = () => {};
+  const quitPromise = new Promise<void>((resolve) => {
+    resolveQuitPromise = resolve;
+  });
   let engineStarted = false;
   let executionPromise: Promise<void> | null = null;
   let shutdownPromise: Promise<void> | null = null;
@@ -2322,7 +2325,7 @@ async function runWithTui(
       }
 
       // Resolve the quit promise to let the main function continue
-      resolveQuitPromise?.();
+      resolveQuitPromise();
     })();
 
     await shutdownPromise;
@@ -2342,6 +2345,14 @@ async function runWithTui(
       cancelledCallback?.();
     },
     onShowDialog: () => {
+      if (!showDialogCallback) {
+        // The TUI has not mounted yet, so no confirmation can be displayed;
+        // treat the interrupt as a graceful shutdown request instead of
+        // leaving the handler stuck in its confirming state.
+        interruptHandler.reset();
+        void gracefulShutdown();
+        return;
+      }
       showDialogCallback?.();
     },
     onHideDialog: () => {
@@ -2437,9 +2448,7 @@ async function runWithTui(
 
   // Wait for user to explicitly quit (q key or Ctrl+C)
   // This promise resolves when gracefulShutdown is called
-  await new Promise<void>((resolve) => {
-    resolveQuitPromise = resolve;
-  });
+  await quitPromise;
 
   clearInterval(checkCallbacks);
   process.removeListener('SIGTERM', gracefulShutdown);
@@ -2507,6 +2516,14 @@ async function runRemoteOnlyTui(args: {
       cancelledCallback?.();
     },
     onShowDialog: () => {
+      if (!showDialogCallback) {
+        // The TUI has not mounted yet, so no confirmation can be displayed;
+        // treat the interrupt as a graceful shutdown request instead of
+        // leaving the handler stuck in its confirming state.
+        interruptHandler.reset();
+        void gracefulShutdown();
+        return;
+      }
       showDialogCallback?.();
     },
     onHideDialog: () => {
@@ -2573,7 +2590,10 @@ async function runParallelWithTui(
   executionScopes: ExecutionScope[] = [],
 ): Promise<ParallelTuiRunResult> {
   let currentState = persistedState;
-  let resolveQuitPromise: (() => void) | null = null;
+  let resolveQuitPromise: () => void = () => {};
+  const quitPromise = new Promise<void>((resolve) => {
+    resolveQuitPromise = resolve;
+  });
   let showDialogCallback: (() => void) | null = null;
   let hideDialogCallback: (() => void) | null = null;
   let cancelledCallback: (() => void) | null = null;
@@ -2974,7 +2994,7 @@ async function runParallelWithTui(
         handleShutdownError('Failed to cleanup TUI during shutdown', error);
       }
 
-      resolveQuitPromise?.();
+      resolveQuitPromise();
     })();
 
     await shutdownPromise;
@@ -2993,6 +3013,14 @@ async function runParallelWithTui(
       cancelledCallback?.();
     },
     onShowDialog: () => {
+      if (!showDialogCallback) {
+        // The TUI has not mounted yet, so no confirmation can be displayed;
+        // treat the interrupt as a graceful shutdown request instead of
+        // leaving the handler stuck in its confirming state.
+        interruptHandler.reset();
+        void gracefulShutdown();
+        return;
+      }
       showDialogCallback?.();
     },
     onHideDialog: () => {
@@ -3168,9 +3196,7 @@ async function runParallelWithTui(
   startParallelExecution();
 
   // Wait for user to quit
-  await new Promise<void>((resolve) => {
-    resolveQuitPromise = resolve;
-  });
+  await quitPromise;
 
   clearInterval(checkCallbacks);
   process.removeListener('SIGTERM', gracefulShutdown);
