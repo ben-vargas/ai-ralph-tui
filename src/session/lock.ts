@@ -4,9 +4,18 @@
  * Provides clear user feedback for lock conflicts and stale lock handling.
  */
 
+import { randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
-import { readFileSync, unlinkSync } from 'node:fs';
 import {
   readFile,
   unlink,
@@ -24,6 +33,18 @@ import type { LockFile } from './types.js';
  */
 const SESSION_DIR = '.ralph-tui';
 const LOCK_FILE = 'ralph.lock';
+const LOCK_GUARD_FILE = 'ralph.lock.guard';
+const GUARD_TIMEOUT_MS = 2000;
+const GUARD_STALE_MS = 2000;
+const GUARD_SYNC_TIMEOUT_MS = 300;
+
+interface LockGuardFile {
+  pid: number;
+  guardId: string;
+  acquiredAt: string;
+}
+
+let currentLockId: string | null = null;
 
 /**
  * Result of checking the lock status
@@ -80,6 +101,13 @@ function getLockPath(cwd: string): string {
 }
 
 /**
+ * Get the lock guard path.
+ */
+function getLockGuardPath(cwd: string): string {
+  return join(getSessionDir(cwd), LOCK_GUARD_FILE);
+}
+
+/**
  * Ensure session directory exists
  */
 async function ensureSessionDir(cwd: string): Promise<void> {
@@ -122,6 +150,273 @@ async function readLockFile(cwd: string): Promise<LockFile | null> {
 }
 
 /**
+ * Read the lock guard if it exists.
+ */
+async function readLockGuardFile(cwd: string): Promise<LockGuardFile | null> {
+  try {
+    const content = await readFile(getLockGuardPath(cwd), 'utf-8');
+    return JSON.parse(content) as LockGuardFile;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the lock guard synchronously if it exists.
+ */
+function readLockGuardFileSync(cwd: string): LockGuardFile | null {
+  try {
+    const content = readFileSync(getLockGuardPath(cwd), 'utf-8');
+    return JSON.parse(content) as LockGuardFile;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check whether a guard has been abandoned.
+ */
+function isGuardStale(guard: LockGuardFile): boolean {
+  const acquiredAt = Date.parse(guard.acquiredAt);
+  return (
+    !isProcessRunning(guard.pid) ||
+    Number.isNaN(acquiredAt) ||
+    Date.now() - acquiredAt >= GUARD_STALE_MS
+  );
+}
+
+/**
+ * Remove a guard only when it still has the observed identity.
+ */
+async function removeGuardIfOwned(
+  cwd: string,
+  guardId: string
+): Promise<void> {
+  const guard = await readLockGuardFile(cwd);
+  if (guard?.guardId !== guardId) {
+    return;
+  }
+
+  try {
+    await unlink(getLockGuardPath(cwd));
+  } catch {
+    // Ignore a guard removed by another cleanup attempt.
+  }
+}
+
+/**
+ * Remove a guard synchronously only when it still has the observed identity.
+ */
+function removeGuardIfOwnedSync(cwd: string, guardId: string): void {
+  const guard = readLockGuardFileSync(cwd);
+  if (guard?.guardId !== guardId) {
+    return;
+  }
+
+  try {
+    unlinkSync(getLockGuardPath(cwd));
+  } catch {
+    // Ignore a guard removed by another cleanup attempt.
+  }
+}
+
+/**
+ * Break a stale guard without removing a newer guard that replaced it.
+ */
+async function breakStaleGuard(
+  cwd: string,
+  observedGuardId: string
+): Promise<void> {
+  const guard = await readLockGuardFile(cwd);
+  if (guard?.guardId !== observedGuardId || !isGuardStale(guard)) {
+    return;
+  }
+
+  try {
+    await unlink(getLockGuardPath(cwd));
+  } catch {
+    // Ignore a guard removed by its owner.
+  }
+}
+
+/**
+ * Break a stale guard synchronously without removing a newer guard.
+ */
+function breakStaleGuardSync(cwd: string, observedGuardId: string): void {
+  const guard = readLockGuardFileSync(cwd);
+  if (guard?.guardId !== observedGuardId || !isGuardStale(guard)) {
+    return;
+  }
+
+  try {
+    unlinkSync(getLockGuardPath(cwd));
+  } catch {
+    // Ignore a guard removed by its owner.
+  }
+}
+
+/**
+ * Create the guard file atomically.
+ */
+async function tryCreateLockGuard(
+  cwd: string,
+  guardId: string
+): Promise<boolean> {
+  let handle: FileHandle | null = null;
+  let created = false;
+  let writeFailed = false;
+
+  try {
+    handle = await open(getLockGuardPath(cwd), 'wx');
+    created = true;
+    const guard: LockGuardFile = {
+      pid: process.pid,
+      guardId,
+      acquiredAt: new Date().toISOString(),
+    };
+    await handle.writeFile(JSON.stringify(guard), 'utf-8');
+    await handle.sync();
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return false;
+    }
+    writeFailed = created;
+    throw error;
+  } finally {
+    if (handle) {
+      await handle.close();
+    }
+    if (writeFailed) {
+      try {
+        await unlink(getLockGuardPath(cwd));
+      } catch {
+        // Best effort cleanup for a partially-written guard.
+      }
+    }
+  }
+}
+
+/**
+ * Serialize asynchronous mutations of the session lock.
+ */
+async function withLockGuard<T>(
+  cwd: string,
+  fn: () => Promise<T>
+): Promise<T> {
+  await ensureSessionDir(cwd);
+  const guardId = randomUUID();
+  const deadline = Date.now() + GUARD_TIMEOUT_MS;
+
+  while (true) {
+    if (await tryCreateLockGuard(cwd, guardId)) {
+      break;
+    }
+
+    const guard = await readLockGuardFile(cwd);
+    if (guard && isGuardStale(guard)) {
+      await breakStaleGuard(cwd, guard.guardId);
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for the session lock guard');
+    }
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await removeGuardIfOwned(cwd, guardId);
+  }
+}
+
+/**
+ * Serialize synchronous mutations of the session lock.
+ */
+function withLockGuardSync(cwd: string, fn: () => void): void {
+  try {
+    mkdirSync(getSessionDir(cwd), { recursive: true });
+  } catch {
+    fn();
+    return;
+  }
+
+  const guardId = randomUUID();
+  const deadline = Date.now() + GUARD_SYNC_TIMEOUT_MS;
+  const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+  while (true) {
+    let fileDescriptor: number | null = null;
+    let created = false;
+    let writeFailed = false;
+
+    try {
+      fileDescriptor = openSync(getLockGuardPath(cwd), 'wx');
+      created = true;
+      const guard: LockGuardFile = {
+        pid: process.pid,
+        guardId,
+        acquiredAt: new Date().toISOString(),
+      };
+      writeFileSync(fileDescriptor, JSON.stringify(guard), 'utf-8');
+      fsyncSync(fileDescriptor);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+        writeFailed = created;
+        if (fileDescriptor !== null) {
+          closeSync(fileDescriptor);
+          fileDescriptor = null;
+        }
+        if (writeFailed) {
+          try {
+            unlinkSync(getLockGuardPath(cwd));
+          } catch {
+            // Best effort cleanup for a partially-written guard.
+          }
+        }
+        fn();
+        return;
+      }
+    } finally {
+      if (fileDescriptor !== null) {
+        closeSync(fileDescriptor);
+      }
+    }
+
+    const guard = readLockGuardFileSync(cwd);
+    if (guard && isGuardStale(guard)) {
+      breakStaleGuardSync(cwd, guard.guardId);
+    }
+
+    if (Date.now() >= deadline) {
+      // Exit cleanup must not hang behind a broken guard.
+      fn();
+      return;
+    }
+
+    Atomics.wait(sleepBuffer, 0, 0, 5);
+  }
+
+  try {
+    fn();
+  } finally {
+    removeGuardIfOwnedSync(cwd, guardId);
+  }
+}
+
+/**
+ * Check whether the current process owns a lock.
+ */
+function isOurLock(lock: LockFile): boolean {
+  return lock.lockId === undefined
+    ? lock.pid === process.pid
+    : lock.lockId === currentLockId;
+}
+
+/**
  * Check the current lock status without modifying anything
  */
 export async function checkLock(cwd: string): Promise<LockCheckResult> {
@@ -148,6 +443,7 @@ async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
   const lockPath = getLockPath(cwd);
 
   const lock: LockFile = {
+    lockId: randomUUID(),
     pid: process.pid,
     sessionId,
     acquiredAt: new Date().toISOString(),
@@ -162,6 +458,7 @@ async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
     try {
       await handle.writeFile(JSON.stringify(lock, null, 2), 'utf-8');
       await handle.sync();
+      currentLockId = lock.lockId ?? null;
     } catch (error) {
       try {
         await handle.close();
@@ -220,6 +517,17 @@ async function deleteLockFile(cwd: string): Promise<void> {
   } catch {
     // Ignore if lock doesn't exist
   }
+}
+
+/**
+ * Return the standard conflict result for an existing lock.
+ */
+function lockConflictResult(lock: LockFile): LockAcquisitionResult {
+  return {
+    acquired: false,
+    error: `Ralph already running in this repo (PID: ${lock.pid})`,
+    existingPid: lock.pid,
+  };
 }
 
 /**
@@ -284,17 +592,35 @@ export async function acquireLockWithPrompt(
 
   // No lock exists - acquire immediately
   if (!lockStatus.lock) {
-    return tryWriteLockFile(cwd, sessionId);
+    try {
+      return await withLockGuard(cwd, async () => {
+        const refreshed = await checkLock(cwd);
+        if (refreshed.lock) {
+          if (force) {
+            await deleteLockFile(cwd);
+          } else {
+            return lockConflictResult(refreshed.lock);
+          }
+        }
+        return tryWriteLockFile(cwd, sessionId);
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'Timed out waiting for the session lock guard'
+      ) {
+        return {
+          acquired: false,
+          error: error.message,
+        };
+      }
+      throw error;
+    }
   }
 
   // Lock exists and is held by a running process
   if (lockStatus.isLocked && !force) {
-    const pid = lockStatus.lock.pid;
-    return {
-      acquired: false,
-      error: `Ralph already running in this repo (PID: ${pid})`,
-      existingPid: pid,
-    };
+    return lockConflictResult(lockStatus.lock);
   }
 
   // Lock exists but process is not running (stale lock)
@@ -302,8 +628,30 @@ export async function acquireLockWithPrompt(
     if (nonInteractive) {
       // In non-interactive mode, warn and auto-clean
       console.log(`Warning: Removing stale lock (PID: ${lockStatus.lock.pid})`);
-      await deleteLockFile(cwd);
-      return tryWriteLockFile(cwd, sessionId);
+      try {
+        return await withLockGuard(cwd, async () => {
+        const refreshed = await checkLock(cwd);
+          if (refreshed.lock && force) {
+            await deleteLockFile(cwd);
+          } else if (refreshed.lock && !refreshed.isStale) {
+            return lockConflictResult(refreshed.lock);
+          } else if (refreshed.lock) {
+            await deleteLockFile(cwd);
+          }
+          return tryWriteLockFile(cwd, sessionId);
+        });
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          error.message === 'Timed out waiting for the session lock guard'
+        ) {
+          return {
+            acquired: false,
+            error: error.message,
+          };
+        }
+        throw error;
+      }
     }
 
     // Interactive mode - prompt user
@@ -316,15 +664,55 @@ export async function acquireLockWithPrompt(
       };
     }
 
-    await deleteLockFile(cwd);
-    return tryWriteLockFile(cwd, sessionId);
+    try {
+      return await withLockGuard(cwd, async () => {
+        const refreshed = await checkLock(cwd);
+        if (refreshed.lock && force) {
+          await deleteLockFile(cwd);
+        } else if (refreshed.lock && !refreshed.isStale) {
+          return lockConflictResult(refreshed.lock);
+        } else if (refreshed.lock) {
+          await deleteLockFile(cwd);
+        }
+        return tryWriteLockFile(cwd, sessionId);
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'Timed out waiting for the session lock guard'
+      ) {
+        return {
+          acquired: false,
+          error: error.message,
+        };
+      }
+      throw error;
+    }
   }
 
   // Force flag set - override the lock
   if (force) {
     console.log(`Warning: Forcing lock acquisition (previous PID: ${lockStatus.lock.pid})`);
-    await deleteLockFile(cwd);
-    return tryWriteLockFile(cwd, sessionId);
+    try {
+      return await withLockGuard(cwd, async () => {
+        const refreshed = await checkLock(cwd);
+        if (refreshed.lock) {
+          await deleteLockFile(cwd);
+        }
+        return tryWriteLockFile(cwd, sessionId);
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'Timed out waiting for the session lock guard'
+      ) {
+        return {
+          acquired: false,
+          error: error.message,
+        };
+      }
+      throw error;
+    }
   }
 
   // Should not reach here, but handle gracefully
@@ -335,29 +723,91 @@ export async function acquireLockWithPrompt(
 }
 
 /**
+ * Acquire a lock only when no lock file exists.
+ *
+ * This is the legacy session API used by resume flows. Stale locks are
+ * intentionally left for cleanStaleLock to remove first.
+ */
+export async function acquireLockExclusive(
+  cwd: string,
+  sessionId: string
+): Promise<boolean> {
+  try {
+    return await withLockGuard(cwd, async () => {
+      if (await readLockFile(cwd)) {
+        return false;
+      }
+
+      const result = await tryWriteLockFile(cwd, sessionId);
+      return result.acquired;
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === 'Timed out waiting for the session lock guard'
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Remove a stale lock while holding the session lock guard.
+ */
+export async function cleanStaleLock(cwd: string): Promise<boolean> {
+  try {
+    return await withLockGuard(cwd, async () => {
+      const lock = await readLockFile(cwd);
+      if (!lock || isProcessRunning(lock.pid)) {
+        return false;
+      }
+
+      await deleteLockFile(cwd);
+      return true;
+    });
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === 'Timed out waiting for the session lock guard'
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
  * Release the lock for the current session.
  * Should be called on clean exit, or during crash recovery.
  */
 export async function releaseLock(cwd: string): Promise<void> {
-  await deleteLockFile(cwd);
+  await withLockGuard(cwd, async () => {
+    const lock = await readLockFile(cwd);
+    if (lock && isOurLock(lock)) {
+      await deleteLockFile(cwd);
+    }
+  });
 }
 
 /**
  * Release the lock synchronously when the current process owns it.
  */
 export function releaseLockSync(cwd: string): void {
-  const lockPath = getLockPath(cwd);
+  withLockGuardSync(cwd, () => {
+    const lockPath = getLockPath(cwd);
 
-  try {
-    const content = readFileSync(lockPath, 'utf-8');
-    const lock = JSON.parse(content) as LockFile;
+    try {
+      const content = readFileSync(lockPath, 'utf-8');
+      const lock = JSON.parse(content) as LockFile;
 
-    if (lock.pid === process.pid) {
-      unlinkSync(lockPath);
+      if (isOurLock(lock)) {
+        unlinkSync(lockPath);
+      }
+    } catch {
+      // Best effort cleanup for missing or corrupt lock files.
     }
-  } catch {
-    // Best effort cleanup for missing or corrupt lock files.
-  }
+  });
 }
 
 /**

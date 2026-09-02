@@ -4,7 +4,15 @@
  */
 
 import { afterEach, describe, expect, test } from 'bun:test';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -17,6 +25,7 @@ import type { LockFile } from '../../src/session/types.js';
 
 const SESSION_DIR = '.ralph-tui';
 const LOCK_FILE = 'ralph.lock';
+const GUARD_FILE = 'ralph.lock.guard';
 const READY_MARKER = 'LOCK_TEST_READY';
 
 let tempDirs: string[] = [];
@@ -31,9 +40,14 @@ function lockPath(cwd: string): string {
   return join(cwd, SESSION_DIR, LOCK_FILE);
 }
 
-async function writeLock(cwd: string, pid: number): Promise<void> {
+async function writeLock(
+  cwd: string,
+  pid: number,
+  lockId?: string
+): Promise<void> {
   await mkdir(join(cwd, SESSION_DIR), { recursive: true });
   const lock: LockFile = {
+    lockId,
     pid,
     sessionId: 'lock-test-session',
     acquiredAt: new Date().toISOString(),
@@ -41,6 +55,27 @@ async function writeLock(cwd: string, pid: number): Promise<void> {
     hostname: 'lock-test-host',
   };
   await writeFile(lockPath(cwd), JSON.stringify(lock), 'utf-8');
+}
+
+function guardPath(cwd: string): string {
+  return join(cwd, SESSION_DIR, GUARD_FILE);
+}
+
+async function writeGuard(
+  cwd: string,
+  pid: number,
+  acquiredAt = new Date().toISOString()
+): Promise<void> {
+  await mkdir(join(cwd, SESSION_DIR), { recursive: true });
+  await writeFile(
+    guardPath(cwd),
+    JSON.stringify({
+      pid,
+      guardId: `guard-${Date.now()}-${Math.random()}`,
+      acquiredAt,
+    }),
+    'utf-8'
+  );
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -114,6 +149,56 @@ setInterval(() => {}, 1000);
   }
 }
 
+async function spawnLockChild(
+  cwd: string,
+  readyPath: string,
+  mode: 'owner' | 'force',
+  startedPath?: string
+) {
+  const modulePath = join(process.cwd(), 'src/session/lock.ts');
+  const scriptPath = join(cwd, `${mode}-child.ts`);
+  const script = `
+import { readFile, writeFile } from 'node:fs/promises';
+import {
+  acquireLockWithPrompt,
+  registerLockCleanupHandlers,
+} from ${JSON.stringify(modulePath)};
+
+const cwd = process.argv[2];
+const readyPath = process.argv[3];
+const startedPath = process.argv[4];
+if (startedPath) {
+  await writeFile(startedPath, 'started', 'utf-8');
+}
+const result = await acquireLockWithPrompt(cwd, ${JSON.stringify(mode)}, {
+  force: ${mode === 'force'},
+  nonInteractive: true,
+});
+if (!result.acquired) {
+  process.exit(2);
+}
+registerLockCleanupHandlers(cwd);
+const lock = JSON.parse(await readFile(cwd + '/.ralph-tui/ralph.lock', 'utf-8'));
+await writeFile(readyPath, lock.lockId, 'utf-8');
+setInterval(() => {}, 1000);
+`;
+  await writeFile(scriptPath, script, 'utf-8');
+
+  return Bun.spawn(
+    [
+      process.execPath,
+      scriptPath,
+      cwd,
+      readyPath,
+      ...(startedPath ? [startedPath] : []),
+    ],
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    }
+  );
+}
+
 afterEach(async () => {
   for (const tempDir of tempDirs) {
     await rm(tempDir, { recursive: true, force: true });
@@ -156,6 +241,89 @@ describe('releaseLockSync', () => {
 
     expect(() => releaseLockSync(cwd)).not.toThrow();
     expect(await pathExists(lockPath(cwd))).toBe(true);
+  });
+});
+
+describe('lock identity and guard protocol', () => {
+  test('async and sync release remove a lock with the current lock identity', async () => {
+    const asyncCwd = await createTempDir();
+    const asyncAcquired = await acquireLockWithPrompt(asyncCwd, 'async-release');
+    expect(asyncAcquired.acquired).toBe(true);
+    await releaseLock(asyncCwd);
+    expect(await pathExists(lockPath(asyncCwd))).toBe(false);
+
+    const syncCwd = await createTempDir();
+    const syncAcquired = await acquireLockWithPrompt(syncCwd, 'sync-release');
+    expect(syncAcquired.acquired).toBe(true);
+    releaseLockSync(syncCwd);
+    expect(await pathExists(lockPath(syncCwd))).toBe(false);
+  });
+
+  test('foreign lock identity is not released when the pid matches', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'identity-test');
+    expect(acquired.acquired).toBe(true);
+    await writeLock(cwd, process.pid, 'foreign-lock-id');
+
+    await releaseLock(cwd);
+
+    expect(await pathExists(lockPath(cwd))).toBe(true);
+    releaseLockSync(cwd);
+    expect(await pathExists(lockPath(cwd))).toBe(true);
+  });
+
+  test('legacy lock with the current pid remains releasable', async () => {
+    const cwd = await createTempDir();
+    await writeLock(cwd, process.pid);
+
+    releaseLockSync(cwd);
+
+    expect(await pathExists(lockPath(cwd))).toBe(false);
+  });
+
+  test('waits for a live guard before releasing the lock', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'guard-test');
+    expect(acquired.acquired).toBe(true);
+    await writeGuard(cwd, process.pid);
+
+    const releasePromise = releaseLock(cwd);
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(await pathExists(lockPath(cwd))).toBe(true);
+      expect(await pathExists(guardPath(cwd))).toBe(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+
+    await rm(guardPath(cwd), { force: true });
+    await releasePromise;
+    expect(await pathExists(lockPath(cwd))).toBe(false);
+  });
+
+  test('breaks a stale guard before releasing the lock', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'stale-guard-test');
+    expect(acquired.acquired).toBe(true);
+    await writeGuard(cwd, 2147483647);
+
+    await releaseLock(cwd);
+
+    expect(await pathExists(lockPath(cwd))).toBe(false);
+    expect(await pathExists(guardPath(cwd))).toBe(false);
+  });
+
+  test('sync release falls back after the guard budget expires', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'sync-budget-test');
+    expect(acquired.acquired).toBe(true);
+    await writeGuard(cwd, process.pid);
+
+    const startedAt = Date.now();
+    releaseLockSync(cwd);
+    const elapsed = Date.now() - startedAt;
+
+    expect(elapsed).toBeLessThan(1000);
+    expect(await pathExists(lockPath(cwd))).toBe(false);
+    await rm(guardPath(cwd), { force: true });
   });
 });
 
@@ -203,3 +371,100 @@ describe('startup signal ownership', () => {
     await runSignalChild('SIGINT', 130);
   });
 });
+
+test(
+  'serializes sync release and force replacement across processes',
+  async () => {
+    const cwd = await createTempDir();
+    const ownerReadyPath = join(cwd, 'owner-ready');
+    const forceStartedPath = join(cwd, 'force-started');
+    const forceReadyPath = join(cwd, 'force-ready');
+    const owner = await spawnLockChild(cwd, ownerReadyPath, 'owner');
+
+    try {
+      await waitForReadyFile(ownerReadyPath, 2000);
+      await writeGuard(cwd, process.pid);
+      owner.kill('SIGTERM');
+
+      const force = await spawnLockChild(
+        cwd,
+        forceReadyPath,
+        'force',
+        forceStartedPath
+      );
+      try {
+        await waitForReadyFile(forceStartedPath, 2000);
+        await rm(guardPath(cwd), { force: true });
+
+        expect(await owner.exited).toBe(143);
+        await waitForReadyFile(forceReadyPath, 2000);
+        const lock = JSON.parse(await readFile(lockPath(cwd), 'utf-8')) as LockFile;
+        const forceLockId = await readFile(forceReadyPath, 'utf-8');
+        expect(lock.lockId).toBe(forceLockId);
+        const lockFiles = (await readdir(join(cwd, SESSION_DIR))).filter(
+          (file) => file === LOCK_FILE
+        );
+        expect(lockFiles).toHaveLength(1);
+        expect(force?.killed).toBe(false);
+        expect(force.killed).toBe(false);
+      } finally {
+        if (!force.killed) {
+          force.kill('SIGTERM');
+          await force.exited;
+        }
+      }
+    } finally {
+      if (!owner.killed) {
+        owner.kill('SIGKILL');
+        await owner.exited;
+      }
+    }
+  },
+  10000
+);
+
+test(
+  'repeated concurrent replacement keeps exactly one surviving lock',
+  async () => {
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      const cwd = await createTempDir();
+      const ownerReadyPath = join(cwd, 'owner-ready');
+      const forceStartedPath = join(cwd, 'force-started');
+      const forceReadyPath = join(cwd, 'force-ready');
+      const owner = await spawnLockChild(cwd, ownerReadyPath, 'owner');
+      let force: Awaited<ReturnType<typeof spawnLockChild>> | null = null;
+
+      try {
+        await waitForReadyFile(ownerReadyPath, 2000);
+        force = await spawnLockChild(
+          cwd,
+          forceReadyPath,
+          'force',
+          forceStartedPath
+        );
+        await waitForReadyFile(forceStartedPath, 2000);
+        owner.kill('SIGTERM');
+
+        expect(await owner.exited).toBe(143);
+        await waitForReadyFile(forceReadyPath, 2000);
+        const lock = JSON.parse(await readFile(lockPath(cwd), 'utf-8')) as LockFile;
+        const forceLockId = await readFile(forceReadyPath, 'utf-8');
+        expect(lock.lockId).toBe(forceLockId);
+        const lockFiles = (await readdir(join(cwd, SESSION_DIR))).filter(
+          (file) => file === LOCK_FILE
+        );
+        expect(lockFiles).toHaveLength(1);
+      } finally {
+        if (force && !force.killed) {
+          force.kill('SIGTERM');
+          await force.exited;
+        }
+        if (!owner.killed) {
+          owner.kill('SIGKILL');
+          await owner.exited;
+        }
+      }
+    }
+  },
+  30000
+);
