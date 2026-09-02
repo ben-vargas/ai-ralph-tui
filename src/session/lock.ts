@@ -6,6 +6,7 @@
 
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { readFileSync, unlinkSync } from 'node:fs';
 import {
   readFile,
   unlink,
@@ -342,13 +343,30 @@ export async function releaseLock(cwd: string): Promise<void> {
 }
 
 /**
+ * Release the lock synchronously when the current process owns it.
+ */
+export function releaseLockSync(cwd: string): void {
+  const lockPath = getLockPath(cwd);
+
+  try {
+    const content = readFileSync(lockPath, 'utf-8');
+    const lock = JSON.parse(content) as LockFile;
+
+    if (lock.pid === process.pid) {
+      unlinkSync(lockPath);
+    }
+  } catch {
+    // Best effort cleanup for missing or corrupt lock files.
+  }
+}
+
+/**
  * Register cleanup handlers to ensure lock is released on exit.
  *
  * This should be called once after acquiring the lock. It registers
  * handlers for:
  * - Normal exit (process.on('exit'))
- * - SIGTERM (graceful shutdown)
- * - SIGINT (Ctrl+C) - handled separately by the run command
+ * - SIGTERM and SIGINT (graceful shutdown)
  * - Uncaught exceptions
  * - Unhandled promise rejections
  *
@@ -358,16 +376,22 @@ export async function releaseLock(cwd: string): Promise<void> {
 export function registerLockCleanupHandlers(cwd: string): () => void {
   // Synchronous cleanup for exit event
   const handleExit = (): void => {
-    // Note: Can only do sync operations in 'exit' handler
-    // The async releaseLock() may not complete, so we rely on
-    // stale lock detection as a fallback
+    releaseLockSync(cwd);
   };
 
-  // Async cleanup for signals
-  const handleTermination = async (): Promise<void> => {
-    await releaseLock(cwd);
-    // Don't call process.exit() here - let the calling code handle that
+  // While this is the only listener, nothing else can shut down the process,
+  // so the lock layer terminates with the conventional signal exit code.
+  // Once the run command or parallel mode installs its own listener, this
+  // handler becomes a no-op and the application owns the signal entirely.
+  const handleSignal = (signal: 'SIGTERM' | 'SIGINT') => (): void => {
+    if (process.listenerCount(signal) > 1) {
+      return;
+    }
+    releaseLockSync(cwd);
+    process.exit(signal === 'SIGINT' ? 130 : 143);
   };
+  const handleSigterm = handleSignal('SIGTERM');
+  const handleSigint = handleSignal('SIGINT');
 
   // Handle uncaught errors
   const handleUncaughtError = async (): Promise<void> => {
@@ -376,14 +400,16 @@ export function registerLockCleanupHandlers(cwd: string): () => void {
   };
 
   process.on('exit', handleExit);
-  process.on('SIGTERM', handleTermination);
+  process.on('SIGTERM', handleSigterm);
+  process.on('SIGINT', handleSigint);
   process.on('uncaughtException', handleUncaughtError);
   process.on('unhandledRejection', handleUncaughtError);
 
   // Return cleanup function
   return () => {
     process.off('exit', handleExit);
-    process.off('SIGTERM', handleTermination);
+    process.off('SIGTERM', handleSigterm);
+    process.off('SIGINT', handleSigint);
     process.off('uncaughtException', handleUncaughtError);
     process.off('unhandledRejection', handleUncaughtError);
   };
