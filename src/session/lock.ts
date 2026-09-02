@@ -10,6 +10,8 @@ import {
   fsyncSync,
   mkdirSync,
   openSync,
+  linkSync,
+  readdirSync,
   readFileSync,
   statSync,
   unlinkSync,
@@ -19,11 +21,13 @@ import { hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   readFile,
+  link,
   unlink,
   mkdir,
   access,
   constants,
   open,
+  readdir,
   stat,
   type FileHandle,
 } from 'node:fs/promises';
@@ -131,6 +135,13 @@ function getResolvedLockPath(cwd: string): string {
  */
 function getLockGuardPath(cwd: string): string {
   return join(getSessionDir(cwd), LOCK_GUARD_FILE);
+}
+
+/**
+ * Get the temporary path used to publish a lock guard atomically.
+ */
+function getLockGuardTempPath(cwd: string, guardId: string): string {
+  return join(getSessionDir(cwd), `${LOCK_GUARD_FILE}.${guardId}.tmp`);
 }
 
 /**
@@ -344,7 +355,7 @@ function breakStaleGuardSync(cwd: string, observedGuardId: string): void {
 }
 
 /**
- * Break a malformed guard only when its observed timestamp is unchanged.
+ * Reclaim a legacy or damaged guard only when its observed timestamp is unchanged.
  */
 async function breakMalformedGuard(
   cwd: string,
@@ -411,19 +422,83 @@ function breakMalformedGuardSync(cwd: string, observedMtimeMs: number): void {
 }
 
 /**
- * Create the guard file atomically.
+ * Remove abandoned guard publication files without disturbing fresh attempts.
+ */
+async function cleanStaleGuardTempFiles(cwd: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(getSessionDir(cwd));
+  } catch {
+    return;
+  }
+
+  const prefix = `${LOCK_GUARD_FILE}.`;
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || !entry.endsWith('.tmp')) {
+      continue;
+    }
+
+    const path = join(getSessionDir(cwd), entry);
+    try {
+      const { mtimeMs } = await stat(path);
+      if (Date.now() - mtimeMs >= GUARD_STALE_MS) {
+        await unlink(path);
+      }
+    } catch {
+      // Ignore files removed or made inaccessible by another process.
+    }
+  }
+}
+
+/**
+ * Remove abandoned guard publication files synchronously.
+ */
+function cleanStaleGuardTempFilesSync(cwd: string): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(getSessionDir(cwd));
+  } catch {
+    return;
+  }
+
+  const prefix = `${LOCK_GUARD_FILE}.`;
+  for (const entry of entries) {
+    if (!entry.startsWith(prefix) || !entry.endsWith('.tmp')) {
+      continue;
+    }
+
+    const path = join(getSessionDir(cwd), entry);
+    try {
+      const { mtimeMs } = statSync(path);
+      if (Date.now() - mtimeMs >= GUARD_STALE_MS) {
+        unlinkSync(path);
+      }
+    } catch {
+      // Ignore files removed or made inaccessible by another process.
+    }
+  }
+}
+
+/**
+ * Publish the guard file atomically after writing its complete contents.
  */
 async function tryCreateLockGuard(
   cwd: string,
   guardId: string
 ): Promise<boolean> {
+  const tempPath = getLockGuardTempPath(cwd, guardId);
   let handle: FileHandle | null = null;
-  let created = false;
-  let writeFailed = false;
 
   try {
-    handle = await open(getLockGuardPath(cwd), 'wx');
-    created = true;
+    try {
+      handle = await open(tempPath, 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
+    }
+
     const guard: LockGuardFile = {
       pid: process.pid,
       guardId,
@@ -431,23 +506,74 @@ async function tryCreateLockGuard(
     };
     await handle.writeFile(JSON.stringify(guard), 'utf-8');
     await handle.sync();
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return false;
+
+    await handle.close();
+    handle = null;
+    try {
+      await link(tempPath, getLockGuardPath(cwd));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
     }
-    writeFailed = created;
-    throw error;
   } finally {
-    if (handle) {
+    if (handle !== null) {
       await handle.close();
     }
-    if (writeFailed) {
-      try {
-        await unlink(getLockGuardPath(cwd));
-      } catch {
-        // Best effort cleanup for a partially-written guard.
+    try {
+      await unlink(tempPath);
+    } catch {
+      // Best effort cleanup after publication or a failed attempt.
+    }
+  }
+}
+
+/**
+ * Publish the guard file synchronously after writing its complete contents.
+ */
+function tryCreateLockGuardSync(cwd: string, guardId: string): boolean {
+  const tempPath = getLockGuardTempPath(cwd, guardId);
+  let fileDescriptor: number | null = null;
+
+  try {
+    try {
+      fileDescriptor = openSync(tempPath, 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
       }
+      throw error;
+    }
+
+    const guard: LockGuardFile = {
+      pid: process.pid,
+      guardId,
+      acquiredAt: new Date().toISOString(),
+    };
+    writeFileSync(fileDescriptor, JSON.stringify(guard), 'utf-8');
+    fsyncSync(fileDescriptor);
+    closeSync(fileDescriptor);
+    fileDescriptor = null;
+
+    try {
+      linkSync(tempPath, getLockGuardPath(cwd));
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
+    }
+  } finally {
+    if (fileDescriptor !== null) {
+      closeSync(fileDescriptor);
+    }
+    try {
+      unlinkSync(tempPath);
+    } catch {
+      // Best effort cleanup after publication or a failed attempt.
     }
   }
 }
@@ -468,6 +594,7 @@ async function withLockGuard<T>(
       break;
     }
 
+    await cleanStaleGuardTempFiles(cwd);
     const guardState = await readLockGuardFile(cwd);
     if (guardState.kind === 'held' && isGuardStale(guardState.guard)) {
       await breakStaleGuard(cwd, guardState.guard.guardId);
@@ -505,44 +632,11 @@ function withLockGuardSync(cwd: string, fn: () => void): void {
   const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
   while (true) {
-    let fileDescriptor: number | null = null;
-    let created = false;
-    let writeFailed = false;
-
-    try {
-      fileDescriptor = openSync(getLockGuardPath(cwd), 'wx');
-      created = true;
-      const guard: LockGuardFile = {
-        pid: process.pid,
-        guardId,
-        acquiredAt: new Date().toISOString(),
-      };
-      writeFileSync(fileDescriptor, JSON.stringify(guard), 'utf-8');
-      fsyncSync(fileDescriptor);
+    if (tryCreateLockGuardSync(cwd, guardId)) {
       break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-        writeFailed = created;
-        if (fileDescriptor !== null) {
-          closeSync(fileDescriptor);
-          fileDescriptor = null;
-        }
-        if (writeFailed) {
-          try {
-            unlinkSync(getLockGuardPath(cwd));
-          } catch {
-            // Best effort cleanup for a partially-written guard.
-          }
-        }
-        // Give up without mutating the lock; the next start recovers it as stale.
-        return;
-      }
-    } finally {
-      if (fileDescriptor !== null) {
-        closeSync(fileDescriptor);
-      }
     }
 
+    cleanStaleGuardTempFilesSync(cwd);
     const guardState = readLockGuardFileSync(cwd);
     if (guardState.kind === 'held' && isGuardStale(guardState.guard)) {
       breakStaleGuardSync(cwd, guardState.guard.guardId);

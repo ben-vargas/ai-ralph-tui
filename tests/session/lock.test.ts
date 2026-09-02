@@ -29,6 +29,7 @@ import type { LockFile } from '../../src/session/types.js';
 const SESSION_DIR = '.ralph-tui';
 const LOCK_FILE = 'ralph.lock';
 const GUARD_FILE = 'ralph.lock.guard';
+const GUARD_TEMP_PREFIX = `${GUARD_FILE}.`;
 const READY_MARKER = 'LOCK_TEST_READY';
 
 let tempDirs: string[] = [];
@@ -62,6 +63,10 @@ async function writeLock(
 
 function guardPath(cwd: string): string {
   return join(cwd, SESSION_DIR, GUARD_FILE);
+}
+
+function guardTempPath(cwd: string, id: string): string {
+  return join(cwd, SESSION_DIR, `${GUARD_TEMP_PREFIX}${id}.tmp`);
 }
 
 async function writeGuard(
@@ -478,12 +483,44 @@ describe('lock identity and guard protocol', () => {
     const acquisition = acquireLockWithPrompt(cwd, 'fresh-guard');
     for (let attempt = 0; attempt < 5; attempt += 1) {
       expect(await pathExists(guardPath(cwd))).toBe(true);
+      expect(await readFile(guardPath(cwd), 'utf-8')).toBe('');
       await new Promise<void>((resolve) => setTimeout(resolve, 10));
     }
 
     await rm(guardPath(cwd), { force: true });
     const result = await acquisition;
     expect(result.acquired).toBe(true);
+    await releaseLock(cwd);
+  });
+
+  test('cleans aged guard temp files but preserves fresh ones', async () => {
+    const cwd = await createTempDir();
+    const agedTempPath = guardTempPath(cwd, 'aged');
+    const freshTempPath = guardTempPath(cwd, 'fresh');
+    await mkdir(join(cwd, SESSION_DIR), { recursive: true });
+    await writeFile(agedTempPath, 'aged', 'utf-8');
+    await writeFile(freshTempPath, 'fresh', 'utf-8');
+    await ageFile(agedTempPath, 11000);
+    await writeGuard(cwd, 2147483647);
+
+    const result = await acquireLockWithPrompt(cwd, 'guard-temp-cleanup');
+
+    expect(result.acquired).toBe(true);
+    expect(await pathExists(agedTempPath)).toBe(false);
+    expect(await pathExists(freshTempPath)).toBe(true);
+    await releaseLock(cwd);
+  });
+
+  test('serializes overlapping guard-backed acquisitions in one process', async () => {
+    const cwd = await createTempDir();
+
+    const results = await Promise.all([
+      acquireLockWithPrompt(cwd, 'overlap-one'),
+      acquireLockWithPrompt(cwd, 'overlap-two'),
+    ]);
+
+    expect(results.filter((result) => result.acquired)).toHaveLength(1);
+    expect(results.filter((result) => !result.acquired)).toHaveLength(1);
     await releaseLock(cwd);
   });
 });
