@@ -51,7 +51,7 @@ Ask questions one set at a time. Each answer should inform your next questions. 
 
 This lets users respond with "1A, 2C" for quick iteration.
 
-If you are Claude Code, you may use the AskUserQuestion tool.
+If you are Claude Code in an interactive session, you may present these questions with the AskUserQuestion tool instead - same questions and options, still one set at a time. When this skill is driven by `ralph-tui create-prd`, the agent runs non-interactively and nothing can answer a tool call, so ask in plain text with lettered options as above.
 
 ### Quality Gates Question (REQUIRED)
 
