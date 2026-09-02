@@ -1,9 +1,13 @@
 /**
  * ABOUTME: Tests for the Beads tracker plugin, focusing on task completion and PRD context.
  * Uses Bun's mock.module to mock child_process.spawn and fs/promises.
+ *
+ * The mock is configured in beforeAll (not at module scope) to avoid polluting
+ * other test files. The module under test is dynamically imported only once
+ * the mock is in place, ensuring isolation.
  */
 
-import { describe, test, expect, mock, beforeEach } from 'bun:test';
+import { describe, test, expect, mock, beforeEach, beforeAll, afterAll } from 'bun:test';
 import { EventEmitter } from 'node:events';
 
 // Create a mock spawn function that we can control
@@ -50,49 +54,59 @@ function createMockChildProcess() {
   return proc;
 }
 
-// Mock the child_process module before importing beads
-mock.module('node:child_process', () => ({
-  spawn: (_cmd: string, args: string[]) => {
-    mockSpawnArgs.push(args);
-    return createMockChildProcess();
-  },
-}));
-
-// Mock node:fs for access (used by detect)
-mock.module('node:fs', () => ({
-  access: (_path: string, _mode: number, callback: (err: Error | null) => void) => {
-    // Always succeed for test purposes
-    callback(null);
-  },
-  constants: {
-    R_OK: 4,
-    W_OK: 2,
-    X_OK: 1,
-    F_OK: 0,
-  },
-  readFileSync: (path: string) => {
-    // Return empty template for template loading
-    if (path.endsWith('template.hbs')) {
-      return '{{taskTitle}}';
-    }
-    return '';
-  },
-}));
-
-// Mock fs/promises for readFile
-mock.module('node:fs/promises', () => ({
-  readFile: async () => {
-    if (mockReadFileShouldFail) {
-      throw new Error('ENOENT: no such file or directory');
-    }
-    return mockReadFileContent;
-  },
-}));
-
-// Import after mocking
-const { BeadsTrackerPlugin } = await import('./beads/index.js');
+// Declare the class type for the import
+let BeadsTrackerPlugin: typeof import('./beads/index.js').BeadsTrackerPlugin;
 
 describe('BeadsTrackerPlugin', () => {
+  beforeAll(async () => {
+    // Mock the child_process module before importing beads
+    mock.module('node:child_process', () => ({
+      spawn: (_cmd: string, args: string[]) => {
+        mockSpawnArgs.push(args);
+        return createMockChildProcess();
+      },
+    }));
+
+    // Mock node:fs for access (used by detect)
+    mock.module('node:fs', () => ({
+      access: (_path: string, _mode: number, callback: (err: Error | null) => void) => {
+        // Always succeed for test purposes
+        callback(null);
+      },
+      constants: {
+        R_OK: 4,
+        W_OK: 2,
+        X_OK: 1,
+        F_OK: 0,
+      },
+      readFileSync: (path: string) => {
+        // Return empty template for template loading
+        if (path.endsWith('template.hbs')) {
+          return '{{taskTitle}}';
+        }
+        return '';
+      },
+    }));
+
+    // Mock fs/promises for readFile
+    mock.module('node:fs/promises', () => ({
+      readFile: async () => {
+        if (mockReadFileShouldFail) {
+          throw new Error('ENOENT: no such file or directory');
+        }
+        return mockReadFileContent;
+      },
+    }));
+
+    // Import after mocking
+    const module = await import('./beads/index.js');
+    BeadsTrackerPlugin = module.BeadsTrackerPlugin;
+  });
+
+  afterAll(() => {
+    mock.restore();
+  });
+
   beforeEach(() => {
     // Reset mock state before each test
     mockSpawnArgs = [];
@@ -111,6 +125,47 @@ describe('BeadsTrackerPlugin', () => {
     await plugin.initialize({ workingDir: '/test', ...config });
     return plugin;
   }
+
+  describe('getTasks', () => {
+    test('uses --limit 0 to bypass default 50 result limit', async () => {
+      // The --limit 0 flag is critical to bypass bd's default limit of 50 results.
+      // Without it, epics with more than 50 tasks would have tasks truncated.
+      // See: https://github.com/subsy/ralph-tui/issues/233
+      mockSpawnStdout = '[]';
+      mockSpawnExitCode = 0;
+
+      const plugin = await createPlugin();
+      mockSpawnArgs = []; // Reset after initialize
+      await plugin.getTasks();
+
+      expect(mockSpawnArgs.length).toBeGreaterThanOrEqual(1);
+      const listCall = mockSpawnArgs.find((args) => args.includes('list'));
+      expect(listCall).toBeDefined();
+      expect(listCall).toContain('--limit');
+      expect(listCall).toContain('0');
+    });
+  });
+
+  describe('getEpics', () => {
+    test('uses --limit 0 to bypass default 50 result limit', async () => {
+      // The --limit 0 flag is critical to bypass bd's default limit of 50 results.
+      // See: https://github.com/subsy/ralph-tui/issues/233
+      mockSpawnStdout = '[]';
+      mockSpawnExitCode = 0;
+
+      const plugin = await createPlugin();
+      mockSpawnArgs = []; // Reset after initialize
+      await plugin.getEpics();
+
+      expect(mockSpawnArgs.length).toBeGreaterThanOrEqual(1);
+      const listCall = mockSpawnArgs.find((args) => args.includes('list'));
+      expect(listCall).toBeDefined();
+      expect(listCall).toContain('--type');
+      expect(listCall).toContain('epic');
+      expect(listCall).toContain('--limit');
+      expect(listCall).toContain('0');
+    });
+  });
 
   describe('completeTask', () => {
     test('uses bd close command with --force flag', async () => {

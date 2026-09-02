@@ -3,6 +3,8 @@
  * Defines session state, lock files, and related structures.
  */
 
+import type { ExecutionScope } from '../plugins/trackers/types.js';
+
 /**
  * Session status
  */
@@ -61,6 +63,12 @@ export interface SessionMetadata {
   /** Epic ID (if using beads) */
   epicId?: string;
 
+  /** Epic IDs for multi-epic runs */
+  epicIds?: string[];
+
+  /** Selected execution scopes for multi-epic runs */
+  executionScopes?: ExecutionScope[];
+
   /** PRD path (if using json tracker) */
   prdPath?: string;
 
@@ -104,6 +112,9 @@ export interface SessionCheckResult {
  * Options for creating a new session
  */
 export interface CreateSessionOptions {
+  /** Optional pre-generated session identifier */
+  sessionId?: string;
+
   /** Agent plugin being used */
   agentPlugin: string;
 
@@ -112,6 +123,12 @@ export interface CreateSessionOptions {
 
   /** Epic ID (if using beads) */
   epicId?: string;
+
+  /** Epic IDs for multi-epic runs */
+  epicIds?: string[];
+
+  /** Selected execution scopes for multi-epic runs */
+  executionScopes?: ExecutionScope[];
 
   /** PRD path (if using json tracker) */
   prdPath?: string;
@@ -124,4 +141,10 @@ export interface CreateSessionOptions {
 
   /** Working directory */
   cwd: string;
+
+  /**
+   * Skip lock acquisition inside createSession.
+   * Used when lock was already acquired by a higher-level orchestrator.
+   */
+  lockAlreadyAcquired?: boolean;
 }

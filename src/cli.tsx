@@ -23,6 +23,22 @@ import {
   executeSkillsCommand,
   executeRemoteCommand,
 } from './commands/index.js';
+import { checkBunVersion } from './utils/validation.js';
+import pkg from '../package.json' with { type: 'json' };
+
+/**
+ * Minimum bun version required to run ralph-tui.
+ * Derived from the engines.bun field in package.json (single source of truth).
+ */
+const MIN_BUN_VERSION = pkg.engines.bun.replace(/^[^\d]*/, '');
+
+if (typeof Bun !== 'undefined') {
+  const versionError = checkBunVersion(Bun.version, MIN_BUN_VERSION);
+  if (versionError) {
+    console.error(versionError);
+    process.exit(1);
+  }
+}
 
 /**
  * Show CLI help message.
@@ -95,6 +111,15 @@ Convert Options:
   --branch, -b <name> Git branch name (prompts if not provided)
   --force, -f         Overwrite existing files
 
+Create-PRD Options:
+  --agent, -a <name>  Override agent plugin (e.g., claude, opencode)
+  --model <name>      Override model (e.g., opus, anthropic/claude-3-5-sonnet)
+  --variant <level>   Model variant/reasoning effort (e.g., minimal, high, max)
+  --output, -o <dir>  Output directory for PRD files (default: ./tasks)
+  --prd-skill <name>  PRD skill folder inside skills_dir
+  --timeout, -t <ms>  Timeout for AI agent calls (0 = no timeout)
+  --force, -f         Overwrite existing files
+
 Examples:
   ralph-tui                              # Start execution (same as 'run')
   ralph-tui create-prd                   # Create a new PRD interactively
@@ -139,9 +164,7 @@ async function handleSubcommand(args: string[]): Promise<boolean> {
 
   // Version command
   if (command === 'version' || command === '--version' || command === '-v') {
-    // Dynamic import to get version from package.json
-    const pkg = await import('../package.json', { with: { type: 'json' } });
-    console.log(`ralph-tui ${pkg.default.version}`);
+    console.log(`ralph-tui ${pkg.version}`);
     return true;
   }
 

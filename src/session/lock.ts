@@ -6,13 +6,15 @@
 
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { readFileSync, unlinkSync } from 'node:fs';
 import {
   readFile,
-  writeFile,
   unlink,
   mkdir,
   access,
   constants,
+  open,
+  type FileHandle,
 } from 'node:fs/promises';
 import { promptBoolean } from '../setup/prompts.js';
 import type { LockFile } from './types.js';
@@ -153,7 +155,59 @@ async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
     hostname: hostname(),
   };
 
-  await writeFile(lockPath, JSON.stringify(lock, null, 2));
+  let handle: FileHandle | null = null;
+  try {
+    // 'wx' enforces O_CREAT|O_EXCL so lock creation is atomic across processes.
+    handle = await open(lockPath, 'wx');
+    try {
+      await handle.writeFile(JSON.stringify(lock, null, 2), 'utf-8');
+      await handle.sync();
+    } catch (error) {
+      try {
+        await handle.close();
+      } catch {
+        // Best effort close before removing partial file.
+      }
+      handle = null;
+      try {
+        await unlink(lockPath);
+      } catch {
+        // Best effort cleanup for partial lock file.
+      }
+      throw error;
+    }
+  } finally {
+    if (handle) {
+      await handle.close();
+    }
+  }
+}
+
+/**
+ * Attempt to atomically create a lock file.
+ * Returns a structured conflict result when another process wins the race.
+ */
+async function tryWriteLockFile(
+  cwd: string,
+  sessionId: string
+): Promise<LockAcquisitionResult> {
+  try {
+    await writeLockFile(cwd, sessionId);
+    return { acquired: true };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const refreshed = await checkLock(cwd);
+      const existingPid = refreshed.lock?.pid;
+      return {
+        acquired: false,
+        error: existingPid
+          ? `Ralph already running in this repo (PID: ${existingPid})`
+          : 'Ralph lock already exists in this repo',
+        existingPid,
+      };
+    }
+    throw error;
+  }
 }
 
 /**
@@ -230,8 +284,7 @@ export async function acquireLockWithPrompt(
 
   // No lock exists - acquire immediately
   if (!lockStatus.lock) {
-    await writeLockFile(cwd, sessionId);
-    return { acquired: true };
+    return tryWriteLockFile(cwd, sessionId);
   }
 
   // Lock exists and is held by a running process
@@ -250,8 +303,7 @@ export async function acquireLockWithPrompt(
       // In non-interactive mode, warn and auto-clean
       console.log(`Warning: Removing stale lock (PID: ${lockStatus.lock.pid})`);
       await deleteLockFile(cwd);
-      await writeLockFile(cwd, sessionId);
-      return { acquired: true };
+      return tryWriteLockFile(cwd, sessionId);
     }
 
     // Interactive mode - prompt user
@@ -265,16 +317,14 @@ export async function acquireLockWithPrompt(
     }
 
     await deleteLockFile(cwd);
-    await writeLockFile(cwd, sessionId);
-    return { acquired: true };
+    return tryWriteLockFile(cwd, sessionId);
   }
 
   // Force flag set - override the lock
   if (force) {
     console.log(`Warning: Forcing lock acquisition (previous PID: ${lockStatus.lock.pid})`);
     await deleteLockFile(cwd);
-    await writeLockFile(cwd, sessionId);
-    return { acquired: true };
+    return tryWriteLockFile(cwd, sessionId);
   }
 
   // Should not reach here, but handle gracefully
@@ -293,13 +343,30 @@ export async function releaseLock(cwd: string): Promise<void> {
 }
 
 /**
+ * Release the lock synchronously when the current process owns it.
+ */
+export function releaseLockSync(cwd: string): void {
+  const lockPath = getLockPath(cwd);
+
+  try {
+    const content = readFileSync(lockPath, 'utf-8');
+    const lock = JSON.parse(content) as LockFile;
+
+    if (lock.pid === process.pid) {
+      unlinkSync(lockPath);
+    }
+  } catch {
+    // Best effort cleanup for missing or corrupt lock files.
+  }
+}
+
+/**
  * Register cleanup handlers to ensure lock is released on exit.
  *
  * This should be called once after acquiring the lock. It registers
  * handlers for:
  * - Normal exit (process.on('exit'))
- * - SIGTERM (graceful shutdown)
- * - SIGINT (Ctrl+C) - handled separately by the run command
+ * - SIGTERM and SIGINT (graceful shutdown)
  * - Uncaught exceptions
  * - Unhandled promise rejections
  *
@@ -309,16 +376,22 @@ export async function releaseLock(cwd: string): Promise<void> {
 export function registerLockCleanupHandlers(cwd: string): () => void {
   // Synchronous cleanup for exit event
   const handleExit = (): void => {
-    // Note: Can only do sync operations in 'exit' handler
-    // The async releaseLock() may not complete, so we rely on
-    // stale lock detection as a fallback
+    releaseLockSync(cwd);
   };
 
-  // Async cleanup for signals
-  const handleTermination = async (): Promise<void> => {
-    await releaseLock(cwd);
-    // Don't call process.exit() here - let the calling code handle that
+  // While this is the only listener, nothing else can shut down the process,
+  // so the lock layer terminates with the conventional signal exit code.
+  // Once the run command or parallel mode installs its own listener, this
+  // handler becomes a no-op and the application owns the signal entirely.
+  const handleSignal = (signal: 'SIGTERM' | 'SIGINT') => (): void => {
+    if (process.listenerCount(signal) > 1) {
+      return;
+    }
+    releaseLockSync(cwd);
+    process.exit(signal === 'SIGINT' ? 130 : 143);
   };
+  const handleSigterm = handleSignal('SIGTERM');
+  const handleSigint = handleSignal('SIGINT');
 
   // Handle uncaught errors
   const handleUncaughtError = async (): Promise<void> => {
@@ -327,14 +400,16 @@ export function registerLockCleanupHandlers(cwd: string): () => void {
   };
 
   process.on('exit', handleExit);
-  process.on('SIGTERM', handleTermination);
+  process.on('SIGTERM', handleSigterm);
+  process.on('SIGINT', handleSigint);
   process.on('uncaughtException', handleUncaughtError);
   process.on('unhandledRejection', handleUncaughtError);
 
   // Return cleanup function
   return () => {
     process.off('exit', handleExit);
-    process.off('SIGTERM', handleTermination);
+    process.off('SIGTERM', handleSigterm);
+    process.off('SIGINT', handleSigint);
     process.off('uncaughtException', handleUncaughtError);
     process.off('unhandledRejection', handleUncaughtError);
   };
