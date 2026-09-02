@@ -35,6 +35,12 @@ const GUARD_FILE = 'ralph.lock.guard';
 const GUARD_TEMP_PREFIX = `${GUARD_FILE}.`;
 const READY_MARKER = 'LOCK_TEST_READY';
 
+interface LockGuardRecord {
+  pid: number;
+  guardId: string;
+  acquiredAt: string;
+}
+
 let tempDirs: string[] = [];
 
 async function createTempDir(): Promise<string> {
@@ -571,7 +577,7 @@ describe('lock identity and guard protocol', () => {
 
   test('falls back to exclusive guard creation when hard links are unsupported', async () => {
     const cwd = await createTempDir();
-    const publishedGuards: LockFile[] = [];
+    const publishedGuards: LockGuardRecord[] = [];
     const unsupportedError = Object.assign(
       new Error('hard links are not supported'),
       { code: 'ENOTSUP' }
@@ -579,7 +585,7 @@ describe('lock identity and guard protocol', () => {
     const linkSpy = spyOn(fsPromises, 'link').mockImplementation(
       async (tempPath) => {
         publishedGuards.push(
-          JSON.parse(await readFile(tempPath, 'utf-8')) as LockFile
+          JSON.parse(await readFile(tempPath, 'utf-8')) as LockGuardRecord
         );
         throw unsupportedError;
       }
@@ -607,7 +613,7 @@ describe('lock identity and guard protocol', () => {
     const cwd = await createTempDir();
     const acquired = await acquireLockWithPrompt(cwd, 'sync-fallback');
     expect(acquired.acquired).toBe(true);
-    let publishedGuard: LockFile | undefined;
+    let publishedGuard: LockGuardRecord | undefined;
     const unsupportedError = Object.assign(
       new Error('hard links are not supported'),
       { code: 'EOPNOTSUPP' }
@@ -616,7 +622,7 @@ describe('lock identity and guard protocol', () => {
       (tempPath) => {
         publishedGuard = JSON.parse(
           fs.readFileSync(tempPath, 'utf-8')
-        ) as LockFile;
+        ) as LockGuardRecord;
         throw unsupportedError;
       }
     );
