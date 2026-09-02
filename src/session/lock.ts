@@ -48,6 +48,12 @@ const GUARD_MALFORMED_GRACE_MS = 250;
 const GUARD_SYNC_TIMEOUT_MS = 300;
 const LOCK_GUARD_TIMEOUT_MESSAGE =
   'Timed out waiting for the session lock (another ralph-tui process may be starting or exiting)';
+const HARD_LINK_UNSUPPORTED_CODES = new Set([
+  'EPERM',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+  'EXDEV',
+]);
 
 interface LockGuardFile {
   pid: number;
@@ -355,7 +361,8 @@ function breakStaleGuardSync(cwd: string, observedGuardId: string): void {
 }
 
 /**
- * Reclaim a legacy or damaged guard only when its observed timestamp is unchanged.
+ * Reclaim a malformed guard from a legacy version, damaged filesystem, or
+ * create-then-write fallback only when its observed timestamp is unchanged.
  */
 async function breakMalformedGuard(
   cwd: string,
@@ -480,6 +487,65 @@ function cleanStaleGuardTempFilesSync(cwd: string): void {
 }
 
 /**
+ * Publish a complete guard with exclusive creation when hard links are unavailable.
+ */
+async function tryCreateLockGuardWithoutLink(
+  cwd: string,
+  guard: LockGuardFile
+): Promise<boolean> {
+  let handle: FileHandle | null = null;
+
+  try {
+    try {
+      handle = await open(getLockGuardPath(cwd), 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
+    }
+
+    await handle.writeFile(JSON.stringify(guard), 'utf-8');
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    return true;
+  } finally {
+    if (handle !== null) {
+      await handle.close();
+    }
+  }
+}
+
+function tryCreateLockGuardWithoutLinkSync(
+  cwd: string,
+  guard: LockGuardFile
+): boolean {
+  let fileDescriptor: number | null = null;
+
+  try {
+    try {
+      fileDescriptor = openSync(getLockGuardPath(cwd), 'wx');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        return false;
+      }
+      throw error;
+    }
+
+    writeFileSync(fileDescriptor, JSON.stringify(guard), 'utf-8');
+    fsyncSync(fileDescriptor);
+    closeSync(fileDescriptor);
+    fileDescriptor = null;
+    return true;
+  } finally {
+    if (fileDescriptor !== null) {
+      closeSync(fileDescriptor);
+    }
+  }
+}
+
+/**
  * Publish the guard file atomically after writing its complete contents.
  */
 async function tryCreateLockGuard(
@@ -513,8 +579,12 @@ async function tryCreateLockGuard(
       await link(tempPath, getLockGuardPath(cwd));
       return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') {
         return false;
+      }
+      if (HARD_LINK_UNSUPPORTED_CODES.has(code ?? '')) {
+        return tryCreateLockGuardWithoutLink(cwd, guard);
       }
       throw error;
     }
@@ -561,8 +631,12 @@ function tryCreateLockGuardSync(cwd: string, guardId: string): boolean {
       linkSync(tempPath, getLockGuardPath(cwd));
       return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') {
         return false;
+      }
+      if (HARD_LINK_UNSUPPORTED_CODES.has(code ?? '')) {
+        return tryCreateLockGuardWithoutLinkSync(cwd, guard);
       }
       throw error;
     }

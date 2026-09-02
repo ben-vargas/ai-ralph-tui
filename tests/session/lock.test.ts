@@ -3,7 +3,8 @@
  * Covers owned-lock release, listener handoff, and signal exit behavior.
  */
 
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import * as fs from 'node:fs';
 import {
   access,
   chmod,
@@ -15,6 +16,7 @@ import {
   utimes,
   writeFile,
 } from 'node:fs/promises';
+import * as fsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -565,6 +567,69 @@ describe('lock identity and guard protocol', () => {
     expect(results.filter((result) => result.acquired)).toHaveLength(1);
     expect(results.filter((result) => !result.acquired)).toHaveLength(1);
     await releaseLock(cwd);
+  });
+
+  test('falls back to exclusive guard creation when hard links are unsupported', async () => {
+    const cwd = await createTempDir();
+    const publishedGuards: LockFile[] = [];
+    const unsupportedError = Object.assign(
+      new Error('hard links are not supported'),
+      { code: 'ENOTSUP' }
+    );
+    const linkSpy = spyOn(fsPromises, 'link').mockImplementation(
+      async (tempPath) => {
+        publishedGuards.push(
+          JSON.parse(await readFile(tempPath, 'utf-8')) as LockFile
+        );
+        throw unsupportedError;
+      }
+    );
+
+    try {
+      const results = await Promise.all([
+        acquireLockWithPrompt(cwd, 'fallback-one'),
+        acquireLockWithPrompt(cwd, 'fallback-two'),
+      ]);
+
+      expect(results.filter((result) => result.acquired)).toHaveLength(1);
+      expect(results.filter((result) => !result.acquired)).toHaveLength(1);
+      expect(publishedGuards.length).toBeGreaterThan(0);
+      expect(publishedGuards[0]?.pid).toBe(process.pid);
+      const lock = JSON.parse(await readFile(lockPath(cwd), 'utf-8')) as LockFile;
+      expect(lock.pid).toBe(process.pid);
+    } finally {
+      linkSpy.mockRestore();
+      await releaseLock(cwd);
+    }
+  });
+
+  test('falls back to exclusive sync guard creation when hard links are unsupported', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'sync-fallback');
+    expect(acquired.acquired).toBe(true);
+    let publishedGuard: LockFile | undefined;
+    const unsupportedError = Object.assign(
+      new Error('hard links are not supported'),
+      { code: 'EOPNOTSUPP' }
+    );
+    const linkSyncSpy = spyOn(fs, 'linkSync').mockImplementation(
+      (tempPath) => {
+        publishedGuard = JSON.parse(
+          fs.readFileSync(tempPath, 'utf-8')
+        ) as LockFile;
+        throw unsupportedError;
+      }
+    );
+
+    try {
+      releaseLockSync(cwd);
+
+      expect(publishedGuard?.pid).toBe(process.pid);
+      expect(await pathExists(lockPath(cwd))).toBe(false);
+    } finally {
+      linkSyncSpy.mockRestore();
+      await releaseLock(cwd);
+    }
   });
 });
 
