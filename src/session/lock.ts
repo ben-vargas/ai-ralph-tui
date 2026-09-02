@@ -42,6 +42,8 @@ const GUARD_TIMEOUT_MS = 2000;
 const GUARD_STALE_MS = 10000;
 const GUARD_MALFORMED_GRACE_MS = 250;
 const GUARD_SYNC_TIMEOUT_MS = 300;
+const LOCK_GUARD_TIMEOUT_MESSAGE =
+  'Timed out waiting for the session lock (another ralph-tui process may be starting or exiting)';
 
 interface LockGuardFile {
   pid: number;
@@ -745,8 +747,7 @@ async function replaceLockUnderGuard(
     if (error instanceof LockGuardTimeoutError) {
       return {
         acquired: false,
-        error:
-          'Timed out waiting for the session lock (another ralph-tui process may be starting or exiting)',
+        error: LOCK_GUARD_TIMEOUT_MESSAGE,
       };
     }
     throw error;
@@ -832,25 +833,38 @@ export async function acquireLockWithPrompt(
  * This is the legacy session API used by resume flows. Stale locks are
  * intentionally left for cleanStaleLock to remove first.
  */
+export async function acquireLockExclusiveResult(
+  cwd: string,
+  sessionId: string
+): Promise<LockAcquisitionResult> {
+  try {
+    return await withLockGuard(cwd, async () => {
+      const lock = await readLockFile(cwd);
+      if (lock) {
+        return lockConflictResult(lock);
+      }
+
+      return tryWriteLockFile(cwd, sessionId);
+    });
+  } catch (error) {
+    if (error instanceof LockGuardTimeoutError) {
+      return {
+        acquired: false,
+        error: LOCK_GUARD_TIMEOUT_MESSAGE,
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Acquire a lock only when no lock file exists.
+ */
 export async function acquireLockExclusive(
   cwd: string,
   sessionId: string
 ): Promise<boolean> {
-  try {
-    return await withLockGuard(cwd, async () => {
-      if (await readLockFile(cwd)) {
-        return false;
-      }
-
-      const result = await tryWriteLockFile(cwd, sessionId);
-      return result.acquired;
-    });
-  } catch (error) {
-    if (error instanceof LockGuardTimeoutError) {
-      return false;
-    }
-    throw error;
-  }
+  return (await acquireLockExclusiveResult(cwd, sessionId)).acquired;
 }
 
 /**

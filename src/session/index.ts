@@ -365,6 +365,7 @@ export type {
 export {
   checkLock,
   acquireLockWithPrompt,
+  acquireLockExclusiveResult,
   acquireLockExclusive as acquireLock,
   cleanStaleLock,
   releaseLock,

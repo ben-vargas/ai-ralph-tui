@@ -36,6 +36,7 @@ const mockCheckLock = mock(() => Promise.resolve({
 // This prevents mock pollution affecting other tests
 import {
   checkSession,
+  acquireLockExclusiveResult,
   acquireLock,
   releaseLock,
   cleanStaleLock,
@@ -75,6 +76,7 @@ mock.module('../../src/session/index.js', () => ({
   checkLock: mockCheckLock,
   // Re-export real functions to prevent pollution
   checkSession,
+  acquireLockExclusiveResult,
   acquireLock,
   releaseLock,
   cleanStaleLock,

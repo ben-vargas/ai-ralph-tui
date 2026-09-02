@@ -18,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   acquireLockWithPrompt,
+  acquireLockExclusive,
+  acquireLockExclusiveResult,
   registerLockCleanupHandlers,
   releaseLock,
   releaseLockSync,
@@ -314,6 +316,29 @@ describe('lock identity and guard protocol', () => {
     expect(await pathExists(lockPath(secondCwd))).toBe(false);
   });
 
+  test('returns conflict details for an existing lock', async () => {
+    const cwd = await createTempDir();
+    await writeLock(cwd, process.pid, 'foreign-lock-id');
+
+    const result = await acquireLockExclusiveResult(cwd, 'conflict-test');
+
+    expect(result.acquired).toBe(false);
+    expect(result.existingPid).toBe(process.pid);
+    expect(result.error).toContain(`PID: ${process.pid}`);
+  });
+
+  test('preserves the boolean exclusive acquisition contract', async () => {
+    const cwd = await createTempDir();
+
+    const acquired = await acquireLockExclusive(cwd, 'boolean-test');
+    expect(acquired).toBe(true);
+    await releaseLock(cwd);
+
+    await writeLock(cwd, process.pid, 'existing-lock-id');
+    const blocked = await acquireLockExclusive(cwd, 'boolean-test-blocked');
+    expect(blocked).toBe(false);
+  });
+
   test('foreign lock identity is not released when the pid matches', async () => {
     const cwd = await createTempDir();
     const acquired = await acquireLockWithPrompt(cwd, 'identity-test');
@@ -368,6 +393,27 @@ describe('lock identity and guard protocol', () => {
 
       expect(elapsed).toBeGreaterThanOrEqual(1900);
       expect(await pathExists(lockPath(cwd))).toBe(true);
+      await rm(guardPath(cwd), { force: true });
+    },
+    5000
+  );
+
+  test(
+    'returns the guard timeout reason from exclusive acquisition',
+    async () => {
+      const cwd = await createTempDir();
+      await writeGuard(cwd, process.pid);
+
+      const startedAt = Date.now();
+      const result = await acquireLockExclusiveResult(cwd, 'guard-timeout');
+      const elapsed = Date.now() - startedAt;
+
+      expect(result.acquired).toBe(false);
+      expect(result.error).toBe(
+        'Timed out waiting for the session lock (another ralph-tui process may be starting or exiting)'
+      );
+      expect(elapsed).toBeGreaterThanOrEqual(1900);
+      expect(await pathExists(guardPath(cwd))).toBe(true);
       await rm(guardPath(cwd), { force: true });
     },
     5000
