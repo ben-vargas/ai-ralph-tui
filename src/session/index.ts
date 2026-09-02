@@ -155,30 +155,6 @@ export async function checkSession(cwd: string): Promise<SessionCheckResult> {
 }
 
 /**
- * Acquire lock for a new session.
- */
-export async function acquireLock(
-  cwd: string,
-  sessionId: string
-): Promise<boolean> {
-  return acquireLockExclusive(cwd, sessionId);
-}
-
-/**
- * Release the lock.
- */
-export async function releaseLock(cwd: string): Promise<void> {
-  await releaseLockWithGuard(cwd);
-}
-
-/**
- * Clean up stale lock (when process is no longer running).
- */
-export async function cleanStaleLock(cwd: string): Promise<boolean> {
-  return cleanStaleLockWithGuard(cwd);
-}
-
-/**
  * Create a new session
  */
 export async function createSession(
@@ -208,7 +184,7 @@ export async function createSession(
   // Acquire lock unless caller already acquired it at a higher level.
   let lockAcquiredHere = false;
   if (!options.lockAlreadyAcquired) {
-    const acquired = await acquireLock(options.cwd, session.id);
+    const acquired = await acquireLockExclusive(options.cwd, session.id);
     if (!acquired) {
       throw new Error('Unable to acquire session lock');
     }
@@ -220,7 +196,7 @@ export async function createSession(
   } catch (error) {
     if (lockAcquiredHere) {
       try {
-        await releaseLock(options.cwd);
+        await releaseLockWithGuard(options.cwd);
       } catch {
         // Best effort cleanup for lock acquired in this function.
       }
@@ -315,7 +291,7 @@ export async function endSession(
   status: SessionStatus = 'completed'
 ): Promise<void> {
   await updateSessionStatus(cwd, status);
-  await releaseLock(cwd);
+  await releaseLockWithGuard(cwd);
 }
 
 /**
@@ -330,10 +306,10 @@ export async function resumeSession(
   }
 
   // Clean up stale lock if present
-  await cleanStaleLock(cwd);
+  await cleanStaleLockWithGuard(cwd);
 
   // Acquire new lock
-  const acquired = await acquireLock(cwd, session.id);
+  const acquired = await acquireLockExclusive(cwd, session.id);
   if (!acquired) {
     return null;
   }
@@ -389,6 +365,9 @@ export type {
 export {
   checkLock,
   acquireLockWithPrompt,
+  acquireLockExclusive as acquireLock,
+  cleanStaleLock,
+  releaseLock,
   releaseLock as releaseLockNew,
   registerLockCleanupHandlers,
   type LockCheckResult,
