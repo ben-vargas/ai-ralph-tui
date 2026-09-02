@@ -11,11 +11,12 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { hostname } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   readFile,
   unlink,
@@ -23,6 +24,7 @@ import {
   access,
   constants,
   open,
+  stat,
   type FileHandle,
 } from 'node:fs/promises';
 import { promptBoolean } from '../setup/prompts.js';
@@ -38,6 +40,7 @@ const GUARD_TIMEOUT_MS = 2000;
 // This must exceed any guarded critical section; abandoned guards are normally
 // reclaimed immediately by the dead-PID check.
 const GUARD_STALE_MS = 10000;
+const GUARD_MALFORMED_GRACE_MS = 250;
 const GUARD_SYNC_TIMEOUT_MS = 300;
 
 interface LockGuardFile {
@@ -46,6 +49,11 @@ interface LockGuardFile {
   acquiredAt: string;
 }
 
+type GuardState =
+  | { kind: 'missing' }
+  | { kind: 'malformed'; mtimeMs: number }
+  | { kind: 'held'; guard: LockGuardFile };
+
 class LockGuardTimeoutError extends Error {
   constructor() {
     super('Timed out waiting for the session lock guard');
@@ -53,7 +61,7 @@ class LockGuardTimeoutError extends Error {
   }
 }
 
-let currentLockId: string | null = null;
+const currentLockIds = new Map<string, string>();
 
 /**
  * Result of checking the lock status
@@ -110,6 +118,13 @@ function getLockPath(cwd: string): string {
 }
 
 /**
+ * Get the resolved lock path used to identify a local lock acquisition.
+ */
+function getResolvedLockPath(cwd: string): string {
+  return resolve(getLockPath(cwd));
+}
+
+/**
  * Get the lock guard path.
  */
 function getLockGuardPath(cwd: string): string {
@@ -159,27 +174,81 @@ async function readLockFile(cwd: string): Promise<LockFile | null> {
 }
 
 /**
- * Read the lock guard if it exists.
+ * Validate parsed lock guard contents.
  */
-async function readLockGuardFile(cwd: string): Promise<LockGuardFile | null> {
-  try {
-    const content = await readFile(getLockGuardPath(cwd), 'utf-8');
-    return JSON.parse(content) as LockGuardFile;
-  } catch {
-    return null;
+function isUsableLockGuard(value: unknown): value is LockGuardFile {
+  if (typeof value !== 'object' || value === null) {
+    return false;
   }
+
+  const guard = value as Record<string, unknown>;
+  return (
+    typeof guard.pid === 'number' &&
+    Number.isInteger(guard.pid) &&
+    guard.pid > 0 &&
+    typeof guard.guardId === 'string' &&
+    guard.guardId.length > 0 &&
+    typeof guard.acquiredAt === 'string' &&
+    guard.acquiredAt.length > 0
+  );
 }
 
 /**
- * Read the lock guard synchronously if it exists.
+ * Read the lock guard and preserve whether it is absent or malformed.
  */
-function readLockGuardFileSync(cwd: string): LockGuardFile | null {
+async function readLockGuardFile(cwd: string): Promise<GuardState> {
+  const guardPath = getLockGuardPath(cwd);
+  let mtimeMs: number;
+
   try {
-    const content = readFileSync(getLockGuardPath(cwd), 'utf-8');
-    return JSON.parse(content) as LockGuardFile;
-  } catch {
-    return null;
+    ({ mtimeMs } = await stat(guardPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { kind: 'missing' };
+    }
+    return { kind: 'malformed', mtimeMs: Number.NaN };
   }
+
+  try {
+    const content = await readFile(guardPath, 'utf-8');
+    const parsed: unknown = JSON.parse(content);
+    if (isUsableLockGuard(parsed)) {
+      return { kind: 'held', guard: parsed };
+    }
+  } catch {
+    // Treat an unreadable guard as malformed while retaining its timestamp.
+  }
+
+  return { kind: 'malformed', mtimeMs };
+}
+
+/**
+ * Read the lock guard synchronously and preserve its state.
+ */
+function readLockGuardFileSync(cwd: string): GuardState {
+  const guardPath = getLockGuardPath(cwd);
+  let mtimeMs: number;
+
+  try {
+    ({ mtimeMs } = statSync(guardPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { kind: 'missing' };
+    }
+    return { kind: 'malformed', mtimeMs: Number.NaN };
+  }
+
+  try {
+    const content = readFileSync(guardPath, 'utf-8');
+    const parsed: unknown = JSON.parse(content);
+    if (isUsableLockGuard(parsed)) {
+      return { kind: 'held', guard: parsed };
+    }
+  } catch {
+    // Treat an unreadable guard as malformed while retaining its timestamp.
+  }
+
+  return { kind: 'malformed', mtimeMs };
 }
 
 /**
@@ -201,8 +270,8 @@ async function removeGuardIfOwned(
   cwd: string,
   guardId: string
 ): Promise<void> {
-  const guard = await readLockGuardFile(cwd);
-  if (guard?.guardId !== guardId) {
+  const state = await readLockGuardFile(cwd);
+  if (state.kind !== 'held' || state.guard.guardId !== guardId) {
     return;
   }
 
@@ -217,8 +286,8 @@ async function removeGuardIfOwned(
  * Remove a guard synchronously only when it still has the observed identity.
  */
 function removeGuardIfOwnedSync(cwd: string, guardId: string): void {
-  const guard = readLockGuardFileSync(cwd);
-  if (guard?.guardId !== guardId) {
+  const state = readLockGuardFileSync(cwd);
+  if (state.kind !== 'held' || state.guard.guardId !== guardId) {
     return;
   }
 
@@ -236,8 +305,12 @@ async function breakStaleGuard(
   cwd: string,
   observedGuardId: string
 ): Promise<void> {
-  const guard = await readLockGuardFile(cwd);
-  if (guard?.guardId !== observedGuardId || !isGuardStale(guard)) {
+  const state = await readLockGuardFile(cwd);
+  if (
+    state.kind !== 'held' ||
+    state.guard.guardId !== observedGuardId ||
+    !isGuardStale(state.guard)
+  ) {
     return;
   }
 
@@ -252,8 +325,12 @@ async function breakStaleGuard(
  * Break a stale guard synchronously without removing a newer guard.
  */
 function breakStaleGuardSync(cwd: string, observedGuardId: string): void {
-  const guard = readLockGuardFileSync(cwd);
-  if (guard?.guardId !== observedGuardId || !isGuardStale(guard)) {
+  const state = readLockGuardFileSync(cwd);
+  if (
+    state.kind !== 'held' ||
+    state.guard.guardId !== observedGuardId ||
+    !isGuardStale(state.guard)
+  ) {
     return;
   }
 
@@ -261,6 +338,73 @@ function breakStaleGuardSync(cwd: string, observedGuardId: string): void {
     unlinkSync(getLockGuardPath(cwd));
   } catch {
     // Ignore a guard removed by its owner.
+  }
+}
+
+/**
+ * Break a malformed guard only when its observed timestamp is unchanged.
+ */
+async function breakMalformedGuard(
+  cwd: string,
+  observedMtimeMs: number
+): Promise<void> {
+  if (
+    !Number.isFinite(observedMtimeMs) ||
+    Date.now() - observedMtimeMs < GUARD_MALFORMED_GRACE_MS
+  ) {
+    return;
+  }
+
+  let currentMtimeMs: number;
+  try {
+    ({ mtimeMs: currentMtimeMs } = await stat(getLockGuardPath(cwd)));
+  } catch {
+    return;
+  }
+
+  if (
+    currentMtimeMs !== observedMtimeMs ||
+    Date.now() - currentMtimeMs < GUARD_MALFORMED_GRACE_MS
+  ) {
+    return;
+  }
+
+  try {
+    await unlink(getLockGuardPath(cwd));
+  } catch {
+    // Ignore a guard removed by another cleanup attempt.
+  }
+}
+
+/**
+ * Break a malformed guard synchronously when its observed timestamp is unchanged.
+ */
+function breakMalformedGuardSync(cwd: string, observedMtimeMs: number): void {
+  if (
+    !Number.isFinite(observedMtimeMs) ||
+    Date.now() - observedMtimeMs < GUARD_MALFORMED_GRACE_MS
+  ) {
+    return;
+  }
+
+  let currentMtimeMs: number;
+  try {
+    ({ mtimeMs: currentMtimeMs } = statSync(getLockGuardPath(cwd)));
+  } catch {
+    return;
+  }
+
+  if (
+    currentMtimeMs !== observedMtimeMs ||
+    Date.now() - currentMtimeMs < GUARD_MALFORMED_GRACE_MS
+  ) {
+    return;
+  }
+
+  try {
+    unlinkSync(getLockGuardPath(cwd));
+  } catch {
+    // Ignore a guard removed by another cleanup attempt.
   }
 }
 
@@ -322,9 +466,11 @@ async function withLockGuard<T>(
       break;
     }
 
-    const guard = await readLockGuardFile(cwd);
-    if (guard && isGuardStale(guard)) {
-      await breakStaleGuard(cwd, guard.guardId);
+    const guardState = await readLockGuardFile(cwd);
+    if (guardState.kind === 'held' && isGuardStale(guardState.guard)) {
+      await breakStaleGuard(cwd, guardState.guard.guardId);
+    } else if (guardState.kind === 'malformed') {
+      await breakMalformedGuard(cwd, guardState.mtimeMs);
     }
 
     if (Date.now() >= deadline) {
@@ -348,7 +494,7 @@ function withLockGuardSync(cwd: string, fn: () => void): void {
   try {
     mkdirSync(getSessionDir(cwd), { recursive: true });
   } catch {
-    fn();
+    // Give up without mutating the lock; the next start recovers it as stale.
     return;
   }
 
@@ -386,7 +532,7 @@ function withLockGuardSync(cwd: string, fn: () => void): void {
             // Best effort cleanup for a partially-written guard.
           }
         }
-        fn();
+        // Give up without mutating the lock; the next start recovers it as stale.
         return;
       }
     } finally {
@@ -395,14 +541,15 @@ function withLockGuardSync(cwd: string, fn: () => void): void {
       }
     }
 
-    const guard = readLockGuardFileSync(cwd);
-    if (guard && isGuardStale(guard)) {
-      breakStaleGuardSync(cwd, guard.guardId);
+    const guardState = readLockGuardFileSync(cwd);
+    if (guardState.kind === 'held' && isGuardStale(guardState.guard)) {
+      breakStaleGuardSync(cwd, guardState.guard.guardId);
+    } else if (guardState.kind === 'malformed') {
+      breakMalformedGuardSync(cwd, guardState.mtimeMs);
     }
 
     if (Date.now() >= deadline) {
-      // Exit cleanup must not hang behind a broken guard.
-      fn();
+      // Give up without mutating the lock; the next start recovers it as stale.
       return;
     }
 
@@ -419,10 +566,10 @@ function withLockGuardSync(cwd: string, fn: () => void): void {
 /**
  * Check whether the current process owns a lock.
  */
-function isOurLock(lock: LockFile): boolean {
+function isOurLock(cwd: string, lock: LockFile): boolean {
   return lock.lockId === undefined
     ? lock.pid === process.pid
-    : lock.lockId === currentLockId;
+    : lock.lockId === currentLockIds.get(getResolvedLockPath(cwd));
 }
 
 /**
@@ -467,7 +614,9 @@ async function writeLockFile(cwd: string, sessionId: string): Promise<void> {
     try {
       await handle.writeFile(JSON.stringify(lock, null, 2), 'utf-8');
       await handle.sync();
-      currentLockId = lock.lockId ?? null;
+      if (lock.lockId) {
+        currentLockIds.set(getResolvedLockPath(cwd), lock.lockId);
+      }
     } catch (error) {
       try {
         await handle.close();
@@ -519,12 +668,14 @@ async function tryWriteLockFile(
 /**
  * Remove the lock file
  */
-async function deleteLockFile(cwd: string): Promise<void> {
+async function deleteLockFile(cwd: string): Promise<boolean> {
   const lockPath = getLockPath(cwd);
   try {
     await unlink(lockPath);
+    return true;
   } catch {
     // Ignore if lock doesn't exist
+    return false;
   }
 }
 
@@ -731,18 +882,21 @@ export async function cleanStaleLock(cwd: string): Promise<boolean> {
 export async function releaseLock(cwd: string): Promise<void> {
   const releaseOwnedLock = async (): Promise<void> => {
     const lock = await readLockFile(cwd);
-    if (lock && isOurLock(lock)) {
-      await deleteLockFile(cwd);
+    if (lock && isOurLock(cwd, lock)) {
+      if (await deleteLockFile(cwd)) {
+        currentLockIds.delete(getResolvedLockPath(cwd));
+      }
     }
   };
 
   try {
     await withLockGuard(cwd, releaseOwnedLock);
   } catch (error) {
-    if (!(error instanceof LockGuardTimeoutError)) {
-      throw error;
+    if (error instanceof LockGuardTimeoutError) {
+      // Leave the lock for the next start to recover as stale.
+      return;
     }
-    await releaseOwnedLock();
+    throw error;
   }
 }
 
@@ -757,8 +911,9 @@ export function releaseLockSync(cwd: string): void {
       const content = readFileSync(lockPath, 'utf-8');
       const lock = JSON.parse(content) as LockFile;
 
-      if (isOurLock(lock)) {
+      if (isOurLock(cwd, lock)) {
         unlinkSync(lockPath);
+        currentLockIds.delete(getResolvedLockPath(cwd));
       }
     } catch {
       // Best effort cleanup for missing or corrupt lock files.

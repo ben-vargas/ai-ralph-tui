@@ -11,6 +11,7 @@ import {
   readFile,
   readdir,
   rm,
+  utimes,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -76,6 +77,19 @@ async function writeGuard(
     }),
     'utf-8'
   );
+}
+
+async function writeMalformedGuard(
+  cwd: string,
+  contents: string
+): Promise<void> {
+  await mkdir(join(cwd, SESSION_DIR), { recursive: true });
+  await writeFile(guardPath(cwd), contents, 'utf-8');
+}
+
+async function ageFile(path: string, ageMs: number): Promise<void> {
+  const timestamp = new Date(Date.now() - ageMs);
+  await utimes(path, timestamp, timestamp);
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -199,6 +213,31 @@ setInterval(() => {}, 1000);
   );
 }
 
+async function spawnPartialGuardChild(
+  cwd: string,
+  readyPath: string
+): Promise<Bun.Subprocess> {
+  const scriptPath = join(cwd, 'partial-guard-child.ts');
+  const guardFilePath = guardPath(cwd);
+  const sessionDirPath = join(cwd, SESSION_DIR);
+  const script = `
+import { closeSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
+
+const guardPath = ${JSON.stringify(guardFilePath)};
+const readyPath = process.argv[2];
+mkdirSync(${JSON.stringify(sessionDirPath)}, { recursive: true });
+const fileDescriptor = openSync(guardPath, 'wx');
+closeSync(fileDescriptor);
+writeFileSync(readyPath, ${JSON.stringify(READY_MARKER)}, 'utf-8');
+`;
+  await writeFile(scriptPath, script, 'utf-8');
+
+  return Bun.spawn([process.execPath, scriptPath, readyPath], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+}
+
 afterEach(async () => {
   for (const tempDir of tempDirs) {
     await rm(tempDir, { recursive: true, force: true });
@@ -259,6 +298,22 @@ describe('lock identity and guard protocol', () => {
     expect(await pathExists(lockPath(syncCwd))).toBe(false);
   });
 
+  test('releases locks independently in two working directories', async () => {
+    const firstCwd = await createTempDir();
+    const secondCwd = await createTempDir();
+    const firstAcquired = await acquireLockWithPrompt(firstCwd, 'first-cwd');
+    const secondAcquired = await acquireLockWithPrompt(secondCwd, 'second-cwd');
+    expect(firstAcquired.acquired).toBe(true);
+    expect(secondAcquired.acquired).toBe(true);
+
+    await releaseLock(firstCwd);
+    expect(await pathExists(lockPath(firstCwd))).toBe(false);
+    expect(await pathExists(lockPath(secondCwd))).toBe(true);
+
+    await releaseLock(secondCwd);
+    expect(await pathExists(lockPath(secondCwd))).toBe(false);
+  });
+
   test('foreign lock identity is not released when the pid matches', async () => {
     const cwd = await createTempDir();
     const acquired = await acquireLockWithPrompt(cwd, 'identity-test');
@@ -300,7 +355,7 @@ describe('lock identity and guard protocol', () => {
   });
 
   test(
-    'releases after an async guard timeout',
+    'leaves the lock after an async guard timeout',
     async () => {
       const cwd = await createTempDir();
       const acquired = await acquireLockWithPrompt(cwd, 'async-budget-test');
@@ -312,7 +367,7 @@ describe('lock identity and guard protocol', () => {
       const elapsed = Date.now() - startedAt;
 
       expect(elapsed).toBeGreaterThanOrEqual(1900);
-      expect(await pathExists(lockPath(cwd))).toBe(false);
+      expect(await pathExists(lockPath(cwd))).toBe(true);
       await rm(guardPath(cwd), { force: true });
     },
     5000
@@ -330,7 +385,7 @@ describe('lock identity and guard protocol', () => {
     expect(await pathExists(guardPath(cwd))).toBe(false);
   });
 
-  test('sync release falls back after the guard budget expires', async () => {
+  test('leaves the lock after the sync guard budget expires', async () => {
     const cwd = await createTempDir();
     const acquired = await acquireLockWithPrompt(cwd, 'sync-budget-test');
     expect(acquired.acquired).toBe(true);
@@ -342,8 +397,48 @@ describe('lock identity and guard protocol', () => {
 
     expect(elapsed).toBeGreaterThanOrEqual(250);
     expect(elapsed).toBeLessThan(1000);
-    expect(await pathExists(lockPath(cwd))).toBe(false);
+    expect(await pathExists(lockPath(cwd))).toBe(true);
     await rm(guardPath(cwd), { force: true });
+  });
+
+  test('reclaims an aged empty guard before acquiring', async () => {
+    const cwd = await createTempDir();
+    await writeMalformedGuard(cwd, '');
+    await ageFile(guardPath(cwd), 1000);
+
+    const result = await acquireLockWithPrompt(cwd, 'empty-guard');
+
+    expect(result.acquired).toBe(true);
+    expect(await pathExists(guardPath(cwd))).toBe(false);
+    await releaseLock(cwd);
+  });
+
+  test('reclaims an aged non-JSON guard before acquiring', async () => {
+    const cwd = await createTempDir();
+    await writeMalformedGuard(cwd, 'not-json');
+    await ageFile(guardPath(cwd), 1000);
+
+    const result = await acquireLockWithPrompt(cwd, 'invalid-guard');
+
+    expect(result.acquired).toBe(true);
+    expect(await pathExists(guardPath(cwd))).toBe(false);
+    await releaseLock(cwd);
+  });
+
+  test('does not reclaim a fresh malformed guard on first observation', async () => {
+    const cwd = await createTempDir();
+    await writeMalformedGuard(cwd, '');
+
+    const acquisition = acquireLockWithPrompt(cwd, 'fresh-guard');
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(await pathExists(guardPath(cwd))).toBe(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    }
+
+    await rm(guardPath(cwd), { force: true });
+    const result = await acquisition;
+    expect(result.acquired).toBe(true);
+    await releaseLock(cwd);
   });
 });
 
@@ -486,4 +581,30 @@ test(
     }
   },
   30000
+);
+
+test(
+  'recovers from a subprocess that leaves a partial guard',
+  async () => {
+    const cwd = await createTempDir();
+    const readyPath = join(cwd, 'partial-guard-ready');
+    const child = await spawnPartialGuardChild(cwd, readyPath);
+
+    try {
+      await waitForReadyFile(readyPath, 2000);
+      expect(await child.exited).toBe(0);
+
+      const result = await acquireLockWithPrompt(cwd, 'partial-guard');
+
+      expect(result.acquired).toBe(true);
+      expect(await pathExists(guardPath(cwd))).toBe(false);
+      await releaseLock(cwd);
+    } finally {
+      if (!child.killed) {
+        child.kill('SIGKILL');
+        await child.exited;
+      }
+    }
+  },
+  5000
 );
