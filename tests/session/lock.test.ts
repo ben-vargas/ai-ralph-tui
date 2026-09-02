@@ -109,6 +109,26 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function canStillCreateFilesIn(directory: string): Promise<boolean> {
+  const probePath = join(
+    directory,
+    `.lock-test-probe-${process.pid}-${Date.now()}-${Math.random()}`
+  );
+
+  try {
+    await writeFile(probePath, 'probe', 'utf-8');
+    await rm(probePath, { force: true });
+    return true;
+  } catch (error) {
+    await rm(probePath, { force: true });
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EACCES' || code === 'EPERM') {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function waitForReadyFile(path: string, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
 
@@ -298,8 +318,14 @@ describe('releaseLockSync', () => {
 
     await chmod(sessionDir, 0o555);
     try {
-      expect(() => releaseLockSync(cwd)).not.toThrow();
-      expect(await pathExists(lockPath(cwd))).toBe(true);
+      if (await canStillCreateFilesIn(sessionDir)) {
+        console.warn(
+          'skipping guard-creation-failure assertions: session dir still writable'
+        );
+      } else {
+        expect(() => releaseLockSync(cwd)).not.toThrow();
+        expect(await pathExists(lockPath(cwd))).toBe(true);
+      }
     } finally {
       await chmod(sessionDir, 0o755);
       await releaseLock(cwd);
