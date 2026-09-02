@@ -6,6 +6,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   access,
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -287,6 +288,22 @@ describe('releaseLockSync', () => {
 
     expect(() => releaseLockSync(cwd)).not.toThrow();
     expect(await pathExists(lockPath(cwd))).toBe(true);
+  });
+
+  test('leaves the lock when guard creation fails unexpectedly', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'guard-creation-error');
+    expect(acquired.acquired).toBe(true);
+    const sessionDir = join(cwd, SESSION_DIR);
+
+    await chmod(sessionDir, 0o555);
+    try {
+      expect(() => releaseLockSync(cwd)).not.toThrow();
+      expect(await pathExists(lockPath(cwd))).toBe(true);
+    } finally {
+      await chmod(sessionDir, 0o755);
+      await releaseLock(cwd);
+    }
   });
 });
 

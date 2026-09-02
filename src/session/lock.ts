@@ -632,8 +632,13 @@ function withLockGuardSync(cwd: string, fn: () => void): void {
   const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
 
   while (true) {
-    if (tryCreateLockGuardSync(cwd, guardId)) {
-      break;
+    try {
+      if (tryCreateLockGuardSync(cwd, guardId)) {
+        break;
+      }
+    } catch {
+      // Give up without mutating the lock; the next start recovers it as stale.
+      return;
     }
 
     cleanStaleGuardTempFilesSync(cwd);
