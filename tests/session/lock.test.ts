@@ -299,6 +299,25 @@ describe('lock identity and guard protocol', () => {
     expect(await pathExists(lockPath(cwd))).toBe(false);
   });
 
+  test(
+    'releases after an async guard timeout',
+    async () => {
+      const cwd = await createTempDir();
+      const acquired = await acquireLockWithPrompt(cwd, 'async-budget-test');
+      expect(acquired.acquired).toBe(true);
+      await writeGuard(cwd, process.pid);
+
+      const startedAt = Date.now();
+      await releaseLock(cwd);
+      const elapsed = Date.now() - startedAt;
+
+      expect(elapsed).toBeGreaterThanOrEqual(1900);
+      expect(await pathExists(lockPath(cwd))).toBe(false);
+      await rm(guardPath(cwd), { force: true });
+    },
+    5000
+  );
+
   test('breaks a stale guard before releasing the lock', async () => {
     const cwd = await createTempDir();
     const acquired = await acquireLockWithPrompt(cwd, 'stale-guard-test');
@@ -321,6 +340,7 @@ describe('lock identity and guard protocol', () => {
     releaseLockSync(cwd);
     const elapsed = Date.now() - startedAt;
 
+    expect(elapsed).toBeGreaterThanOrEqual(250);
     expect(elapsed).toBeLessThan(1000);
     expect(await pathExists(lockPath(cwd))).toBe(false);
     await rm(guardPath(cwd), { force: true });
@@ -405,7 +425,6 @@ test(
           (file) => file === LOCK_FILE
         );
         expect(lockFiles).toHaveLength(1);
-        expect(force?.killed).toBe(false);
         expect(force.killed).toBe(false);
       } finally {
         if (!force.killed) {

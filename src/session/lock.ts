@@ -35,13 +35,22 @@ const SESSION_DIR = '.ralph-tui';
 const LOCK_FILE = 'ralph.lock';
 const LOCK_GUARD_FILE = 'ralph.lock.guard';
 const GUARD_TIMEOUT_MS = 2000;
-const GUARD_STALE_MS = 2000;
+// This must exceed any guarded critical section; abandoned guards are normally
+// reclaimed immediately by the dead-PID check.
+const GUARD_STALE_MS = 10000;
 const GUARD_SYNC_TIMEOUT_MS = 300;
 
 interface LockGuardFile {
   pid: number;
   guardId: string;
   acquiredAt: string;
+}
+
+class LockGuardTimeoutError extends Error {
+  constructor() {
+    super('Timed out waiting for the session lock guard');
+    this.name = 'LockGuardTimeoutError';
+  }
 }
 
 let currentLockId: string | null = null;
@@ -319,7 +328,7 @@ async function withLockGuard<T>(
     }
 
     if (Date.now() >= deadline) {
-      throw new Error('Timed out waiting for the session lock guard');
+      throw new LockGuardTimeoutError();
     }
 
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
@@ -562,6 +571,38 @@ async function promptCleanStaleLock(lock: LockFile): Promise<boolean> {
 }
 
 /**
+ * Re-read and replace the lock while holding the mutation guard.
+ */
+async function replaceLockUnderGuard(
+  cwd: string,
+  sessionId: string,
+  force: boolean
+): Promise<LockAcquisitionResult> {
+  try {
+    return await withLockGuard(cwd, async () => {
+      const refreshed = await checkLock(cwd);
+      if (refreshed.lock) {
+        if (force || refreshed.isStale) {
+          await deleteLockFile(cwd);
+        } else {
+          return lockConflictResult(refreshed.lock);
+        }
+      }
+      return tryWriteLockFile(cwd, sessionId);
+    });
+  } catch (error) {
+    if (error instanceof LockGuardTimeoutError) {
+      return {
+        acquired: false,
+        error:
+          'Timed out waiting for the session lock (another ralph-tui process may be starting or exiting)',
+      };
+    }
+    throw error;
+  }
+}
+
+/**
  * Attempt to acquire the lock for starting a new session.
  *
  * This is the main entry point for lock management. It handles:
@@ -592,30 +633,7 @@ export async function acquireLockWithPrompt(
 
   // No lock exists - acquire immediately
   if (!lockStatus.lock) {
-    try {
-      return await withLockGuard(cwd, async () => {
-        const refreshed = await checkLock(cwd);
-        if (refreshed.lock) {
-          if (force) {
-            await deleteLockFile(cwd);
-          } else {
-            return lockConflictResult(refreshed.lock);
-          }
-        }
-        return tryWriteLockFile(cwd, sessionId);
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === 'Timed out waiting for the session lock guard'
-      ) {
-        return {
-          acquired: false,
-          error: error.message,
-        };
-      }
-      throw error;
-    }
+    return replaceLockUnderGuard(cwd, sessionId, force);
   }
 
   // Lock exists and is held by a running process
@@ -628,30 +646,7 @@ export async function acquireLockWithPrompt(
     if (nonInteractive) {
       // In non-interactive mode, warn and auto-clean
       console.log(`Warning: Removing stale lock (PID: ${lockStatus.lock.pid})`);
-      try {
-        return await withLockGuard(cwd, async () => {
-        const refreshed = await checkLock(cwd);
-          if (refreshed.lock && force) {
-            await deleteLockFile(cwd);
-          } else if (refreshed.lock && !refreshed.isStale) {
-            return lockConflictResult(refreshed.lock);
-          } else if (refreshed.lock) {
-            await deleteLockFile(cwd);
-          }
-          return tryWriteLockFile(cwd, sessionId);
-        });
-      } catch (error) {
-        if (
-          error instanceof Error &&
-          error.message === 'Timed out waiting for the session lock guard'
-        ) {
-          return {
-            acquired: false,
-            error: error.message,
-          };
-        }
-        throw error;
-      }
+      return replaceLockUnderGuard(cwd, sessionId, force);
     }
 
     // Interactive mode - prompt user
@@ -664,55 +659,13 @@ export async function acquireLockWithPrompt(
       };
     }
 
-    try {
-      return await withLockGuard(cwd, async () => {
-        const refreshed = await checkLock(cwd);
-        if (refreshed.lock && force) {
-          await deleteLockFile(cwd);
-        } else if (refreshed.lock && !refreshed.isStale) {
-          return lockConflictResult(refreshed.lock);
-        } else if (refreshed.lock) {
-          await deleteLockFile(cwd);
-        }
-        return tryWriteLockFile(cwd, sessionId);
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === 'Timed out waiting for the session lock guard'
-      ) {
-        return {
-          acquired: false,
-          error: error.message,
-        };
-      }
-      throw error;
-    }
+    return replaceLockUnderGuard(cwd, sessionId, force);
   }
 
   // Force flag set - override the lock
   if (force) {
     console.log(`Warning: Forcing lock acquisition (previous PID: ${lockStatus.lock.pid})`);
-    try {
-      return await withLockGuard(cwd, async () => {
-        const refreshed = await checkLock(cwd);
-        if (refreshed.lock) {
-          await deleteLockFile(cwd);
-        }
-        return tryWriteLockFile(cwd, sessionId);
-      });
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === 'Timed out waiting for the session lock guard'
-      ) {
-        return {
-          acquired: false,
-          error: error.message,
-        };
-      }
-      throw error;
-    }
+    return replaceLockUnderGuard(cwd, sessionId, force);
   }
 
   // Should not reach here, but handle gracefully
@@ -742,10 +695,7 @@ export async function acquireLockExclusive(
       return result.acquired;
     });
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === 'Timed out waiting for the session lock guard'
-    ) {
+    if (error instanceof LockGuardTimeoutError) {
       return false;
     }
     throw error;
@@ -767,10 +717,7 @@ export async function cleanStaleLock(cwd: string): Promise<boolean> {
       return true;
     });
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message === 'Timed out waiting for the session lock guard'
-    ) {
+    if (error instanceof LockGuardTimeoutError) {
       return false;
     }
     throw error;
@@ -782,12 +729,21 @@ export async function cleanStaleLock(cwd: string): Promise<boolean> {
  * Should be called on clean exit, or during crash recovery.
  */
 export async function releaseLock(cwd: string): Promise<void> {
-  await withLockGuard(cwd, async () => {
+  const releaseOwnedLock = async (): Promise<void> => {
     const lock = await readLockFile(cwd);
     if (lock && isOurLock(lock)) {
       await deleteLockFile(cwd);
     }
-  });
+  };
+
+  try {
+    await withLockGuard(cwd, releaseOwnedLock);
+  } catch (error) {
+    if (!(error instanceof LockGuardTimeoutError)) {
+      throw error;
+    }
+    await releaseOwnedLock();
+  }
 }
 
 /**
