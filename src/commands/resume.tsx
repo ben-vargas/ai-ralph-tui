@@ -19,7 +19,7 @@ import {
   setSubagentPanelVisible,
   addActiveTask,
   removeActiveTask,
-  acquireLockExclusiveResult,
+  acquireLockWithPrompt,
   releaseLock,
   checkSession,
   cleanStaleLock,
@@ -636,11 +636,15 @@ export async function executeResumeCommand(args: string[]): Promise<void> {
   }
 
   // Acquire lock
-  const lockResult = await acquireLockExclusiveResult(
+  const lockResult = await acquireLockWithPrompt(
     cwd,
-    persistedState.sessionId
+    persistedState.sessionId,
+    {
+      force,
+      nonInteractive: headless,
+    }
   );
-  if (!lockResult.acquired && !force) {
+  if (!lockResult.acquired) {
     console.error(lockResult.error ?? 'Failed to acquire session lock.');
     process.exit(1);
   }
