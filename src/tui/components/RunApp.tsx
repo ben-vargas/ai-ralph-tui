@@ -61,6 +61,7 @@ import { getIterationLogsByTask } from '../../logs/index.js';
 import type { SubagentTraceStats, SubagentHierarchyNode } from '../../logs/types.js';
 import { platform } from 'node:os';
 import { writeToClipboard } from '../../utils/index.js';
+import { classifyCopyOrInterrupt } from '../utils/keyboard-shortcuts.js';
 import { StreamingOutputParser } from '../output-parser.js';
 import type { FormattedSegment } from '../../plugins/agents/output-formatting.js';
 import {
@@ -110,6 +111,8 @@ export interface RunAppProps {
   onInterruptConfirm?: () => void;
   /** Callback when user cancels interrupt */
   onInterruptCancel?: () => void;
+  /** Callback when the user presses Ctrl+C to request an interrupt */
+  onInterruptRequest?: () => void;
   /** Initial tasks to display before engine starts */
   initialTasks?: TrackerTask[];
   /** Callback when user wants to start the engine (s key in ready state) */
@@ -541,6 +544,7 @@ export function RunApp({
   showInterruptDialog = false,
   onInterruptConfirm,
   onInterruptCancel,
+  onInterruptRequest,
   initialTasks,
   onStart,
   storedConfig,
@@ -2182,16 +2186,22 @@ export function RunApp({
       // - Linux: Ctrl+Shift+C or Alt+C
       // - Windows: Ctrl+C
       // Note: We check this early so copy works even when dialogs are open
-      const isMac = platform() === 'darwin';
-      const isWindows = platform() === 'win32';
       const selection = renderer.getSelection();
-      const isCopyShortcut = isMac
-        ? key.meta && key.name === 'c'
-        : isWindows
-          ? key.ctrl && key.name === 'c'
-          : (key.ctrl && key.shift && key.name === 'c') || (key.option && key.name === 'c');
+      const shortcutAction = classifyCopyOrInterrupt(
+        {
+          name: key.name,
+          ctrl: key.ctrl,
+          shift: key.shift,
+          meta: key.meta,
+          option: key.option,
+        },
+        {
+          platform: platform(),
+          hasSelection: Boolean(selection),
+        }
+      );
 
-      if (isCopyShortcut && selection) {
+      if (shortcutAction === 'copy' && selection) {
         const selectedText = selection.getSelectedText();
         if (selectedText && selectedText.length > 0) {
           writeToClipboard(selectedText).then((result) => {
@@ -2200,6 +2210,11 @@ export function RunApp({
             }
           });
         }
+        return;
+      }
+
+      if (shortcutAction === 'interrupt') {
+        onInterruptRequest?.();
         return;
       }
 
@@ -2907,7 +2922,7 @@ export function RunApp({
           break;
       }
     },
-    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, showHelp, showSettings, showAgentModelPicker, showQuitDialog, showKillDialog, showParallelSummaryOverlay, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager, isParallelMode, parallelWorkers, parallelConflicts, showConflictPanel, onParallelKill, onParallelPause, onParallelResume, onParallelStart, parallelDerivedStatus, onRefreshTasks, scopeFilterEnabled, activeExecutionScopes]
+    [displayedTasks, selectedIndex, status, engine, onQuit, viewMode, iterations, iterationSelectedIndex, iterationHistoryLength, onIterationDrillDown, showInterruptDialog, onInterruptConfirm, onInterruptCancel, onInterruptRequest, showHelp, showSettings, showAgentModelPicker, showQuitDialog, showKillDialog, showParallelSummaryOverlay, showEpicLoader, showRemoteManagement, onStart, storedConfig, onSaveSettings, onLoadEpics, subagentDetailLevel, onSubagentPanelVisibilityChange, currentIteration, maxIterations, renderer, detailsViewMode, subagentPanelVisible, focusedPane, navigateSubagentTree, instanceTabs, selectedTabIndex, onSelectTab, isViewingRemote, displayStatus, instanceManager, isParallelMode, parallelWorkers, parallelConflicts, showConflictPanel, onParallelKill, onParallelPause, onParallelResume, onParallelStart, parallelDerivedStatus, onRefreshTasks, scopeFilterEnabled, activeExecutionScopes]
   );
 
   useKeyboard(handleKeyboard);
