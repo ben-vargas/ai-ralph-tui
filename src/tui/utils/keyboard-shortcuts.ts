@@ -13,9 +13,11 @@ export type CtrlCAction = 'copy' | 'interrupt' | 'none';
 /**
  * Classify copy and interrupt shortcuts across terminal platforms.
  *
- * macOS uses Cmd+C to copy. Linux uses Ctrl+Shift+C and Alt+C to copy.
- * Windows uses Ctrl+C to copy only when text is selected. Plain Ctrl+C
- * otherwise requests an interrupt.
+ * macOS uses Cmd+C to copy. Linux uses Alt+C; Ctrl+Shift+C is also recognized
+ * in terminals that report Shift, such as kitty and ghostty. Konsole and
+ * gnome-terminal send Ctrl+Shift+C as plain 0x03, indistinguishable from
+ * Ctrl+C, so it requests an interrupt there. Windows uses Ctrl+C to copy only
+ * when text is selected. Plain Ctrl+C otherwise requests an interrupt.
  */
 export function classifyCopyOrInterrupt(
   key: ShortcutKey,

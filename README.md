@@ -160,6 +160,8 @@ ralph-tui create-prd --output ./docs
 | `a` | Open agent/model picker (local tab only) |
 | `,` | Open settings (local tab only) |
 | `C` | Open read-only config viewer (Shift+C, works on local and remote tabs) |
+| `Alt+C` (Linux) / `Cmd+C` (macOS) / `Ctrl+C` (Windows) | Copy selected text |
+| `Ctrl+C` | Interrupt (with confirmation) |
 | `q` | Quit |
 | `?` | Show help |
 | `1-9` | Switch to tab 1-9 (remote instances) |
