@@ -206,10 +206,10 @@ const MAX_EXECUTION_STREAM_CHARS = 2_000_000;
 const STREAM_TRUNCATED_PREFIX = '[...agent output truncated in memory...]\n';
 
 // Balances capturing late descendant output against delaying completed agents.
-const STDIO_DRAIN_GRACE_PERIOD_MS = 2000;
+export const STDIO_DRAIN_GRACE_PERIOD_MS = 2000;
 
 // Output arriving this long after exit is attributed to a descendant, not the agent.
-const STDIO_DRAIN_MAX_WAIT_MS = 10_000;
+export const STDIO_DRAIN_MAX_WAIT_MS = 10_000;
 
 /**
  * Append chunk data while enforcing an in-memory size cap.
