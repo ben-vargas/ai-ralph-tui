@@ -25,11 +25,17 @@ bun /path/to/ralph-tui/dist/cli.js run [flags]
 Create a throwaway project dir with its own beads store and drive scenarios with `bd`:
 
 ```bash
-mkdir -p ~/watch-test && cd ~/watch-test
+export RALPH_TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ralph-tui-run.XXXXXX")" && cd "$RALPH_TEST_DIR"
 bd init            # or `bd create ...` which bootstraps the store
-bd create "Watch mode epic" --type epic -p 1          # note the epic id, e.g. watch-test-dbx
+bd create "Watch mode epic" --type epic -p 1          # note the epic id bd prints
 bd create "Alpha task" --type task -p 2 --parent <epic-id>
 ```
+
+A **fresh** dir per run, not a fixed one: a reused dir carries over `.beads` tasks, the
+`.ralph-tui` session file, locks and guards — exactly the things most scenarios here assert on, so
+a `Recovered stale session` banner or a stale-lock prompt from the *previous* run reads as a
+finding of the build under test. The unique dir also gives the run a unique epic id, which is how
+you address its process (see the signal trap below).
 
 Gotchas:
 - `bd` commands must be run **with the scratch dir as the working directory**, otherwise you get
@@ -53,7 +59,7 @@ Wrap the CLI so quit latency is provable in the recording:
 
 ```bash
 #!/bin/bash
-cd ~/watch-test
+cd "${RALPH_TEST_DIR:?export RALPH_TEST_DIR to the scratch dir first}"
 export PATH="$PATH:$HOME/.local/bin"
 echo "START $(date +%H:%M:%S.%3N)  args: $*"
 bun /path/to/ralph-tui/dist/cli.js run "$@"
@@ -92,7 +98,13 @@ Dashboard shows `Waiting for new tasks` when watch-idle.
   `src/utils/clipboard.ts` shells out to on Linux) — record the clipboard write as untested.
 - **Early-startup signals need timing, and are quirky**: the app's SIGINT/SIGTERM handlers are not
   installed for roughly the first ~0.7s. Drive it with
-  `( sleep 0.5; pkill -INT -f 'dist/cli.js run' ) & ./runwatch.sh ...`. Historic behaviour (before
+  `( sleep 0.5; kill -INT "$(pgrep -f "cli\.js run.*--epic $EPIC_ID")" ) & ./runwatch.sh ...`,
+  where `$EPIC_ID` is this run's epic — check the pattern matches exactly one pid
+  (`pgrep -cf ...`) before signalling, and note the wrapper script is a *different* process from
+  the CLI it launches, so signal the pid you matched rather than the wrapper. Do not use
+  `pkill -f 'dist/cli.js run'`: it hits every ralph run on the box, including a parallel test or a
+  `main` worktree build you are comparing against, and mutates their session and task state.
+  Historic behaviour (before
   the #434 fix in `src/session/lock.ts`): SIGINT in that window exited `130` but left a stale lock,
   and SIGTERM was *delivered but ignored* (the TUI mounted and kept running). On builds where
   `registerLockCleanupHandlers` owns the startup signals (guarded by
