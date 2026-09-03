@@ -1044,7 +1044,7 @@ Read the PRD and create the appropriate tasks.${labelsInstruction}`;
 
       // Handle clipboard copy:
       // - macOS: Cmd+C (meta key)
-      // - Linux: Ctrl+Shift+C or Alt+C
+      // - Linux: Alt+C (Ctrl+Shift+C where the terminal reports Shift)
       // - Windows: Ctrl+C
       // Note: We check this early so copy works even when dialogs are open
       const isMac = platform() === 'darwin';
