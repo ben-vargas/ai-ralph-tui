@@ -209,6 +209,7 @@ export const fullKeyboardShortcuts = [
   { key: 'Ctrl+Tab', description: 'Next tab (alternate)', category: 'Instances' },
   { key: 'Ctrl+Shift+Tab', description: 'Previous tab (alternate)', category: 'Instances' },
   { key: 'A', description: 'Add remote instance', category: 'Instances' },
+  { key: 'Alt+C / Cmd+C', description: 'Copy selection (Linux / macOS / Win)', category: 'System' },
   { key: 'Ctrl+C', description: 'Interrupt (with confirmation)', category: 'System' },
   { key: 'Ctrl+C ×2', description: 'Force quit immediately', category: 'System' },
   { key: 'w', description: 'Toggle parallel workers view', category: 'Parallel' },
