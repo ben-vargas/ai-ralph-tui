@@ -19,6 +19,9 @@ export type SessionStatus =
  * Lock file contents
  */
 export interface LockFile {
+  /** Nonce identifying the lock acquisition */
+  lockId?: string;
+
   /** Process ID that holds the lock */
   pid: number;
 
