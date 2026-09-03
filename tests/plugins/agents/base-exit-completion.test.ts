@@ -121,4 +121,31 @@ describe('BaseAgentPlugin process exit completion', () => {
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(3000);
     await stopFixtureChild();
   });
+
+  test(
+    'caps completion when a descendant continuously writes to stdio',
+    { timeout: 15000 },
+    async () => {
+      if (platform() === 'win32') {
+        return;
+      }
+
+      tempDir = await mkdtemp(join(tmpdir(), 'ralph-agent-exit-'));
+      const startedAt = Date.now();
+      const result = await runFixture('continuous', {
+        AGENT_CHILD_PID_FILE: join(tempDir, 'child.pid'),
+        AGENT_FIXTURE_PATH: fixturePath,
+      });
+      const durationMs = Date.now() - startedAt;
+
+      expect(result.status).toBe('completed');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('initial output');
+      expect(result.stdout).toContain('continuous output');
+      expect(result.stdout.match(/continuous output/g)?.length ?? 0).toBeGreaterThan(20);
+      expect(durationMs).toBeGreaterThanOrEqual(9500);
+      expect(durationMs).toBeLessThan(13000);
+      await stopFixtureChild();
+    }
+  );
 });

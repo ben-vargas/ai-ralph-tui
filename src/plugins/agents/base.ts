@@ -178,6 +178,7 @@ interface RunningExecution {
   drainFallbackId?: ReturnType<typeof setTimeout>;
   exitCode?: number | null;
   exitSignal?: NodeJS.Signals | null;
+  exitAt?: number;
 }
 
 /**
@@ -206,6 +207,9 @@ const STREAM_TRUNCATED_PREFIX = '[...agent output truncated in memory...]\n';
 
 // Balances capturing late descendant output against delaying completed agents.
 const STDIO_DRAIN_GRACE_PERIOD_MS = 2000;
+
+// Output arriving this long after exit is attributed to a descendant, not the agent.
+const STDIO_DRAIN_MAX_WAIT_MS = 10_000;
 
 /**
  * Append chunk data while enforcing an in-memory size cap.
@@ -762,6 +766,7 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
         }
         execution.exitCode = code;
         execution.exitSignal = signal;
+        execution.exitAt = Date.now();
         this.scheduleDrainFallback(execution);
       });
 
@@ -898,6 +903,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     };
   }
 
+  /**
+   * Derive the final execution status from process termination details.
+   */
   private deriveExitStatus(
     execution: RunningExecution,
     code: number | null,
@@ -912,6 +920,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     return code === 0 ? 'completed' : 'failed';
   }
 
+  /**
+   * Cancel a pending fallback timer for an execution.
+   */
   private clearDrainFallback(execution: RunningExecution): void {
     if (execution.drainFallbackId !== undefined) {
       clearTimeout(execution.drainFallbackId);
@@ -919,20 +930,20 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     }
   }
 
+  /**
+   * Schedule bounded completion after an exited process's stdio goes quiet.
+   */
   private scheduleDrainFallback(execution: RunningExecution): void {
     this.clearDrainFallback(execution);
-    execution.drainFallbackId = setTimeout(() => {
+
+    const remainingBudget =
+      (execution.exitAt ?? Date.now()) + STDIO_DRAIN_MAX_WAIT_MS - Date.now();
+    const delay = Math.min(STDIO_DRAIN_GRACE_PERIOD_MS, remainingBudget);
+    const finalize = (): void => {
       execution.drainFallbackId = undefined;
       if (!this.executions.has(execution.executionId)) {
         return;
       }
-
-      const status = this.deriveExitStatus(
-        execution,
-        execution.exitCode ?? null,
-        execution.exitSignal ?? null
-      );
-      this.completeExecution(execution.executionId, status, execution.exitCode ?? undefined);
 
       if (process.env.RALPH_DEBUG) {
         debugLog(
@@ -940,9 +951,21 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
             `signal=${execution.exitSignal}, execId=${execution.executionId}`
         );
       }
+      const status = this.deriveExitStatus(
+        execution,
+        execution.exitCode ?? null,
+        execution.exitSignal ?? null
+      );
+      this.completeExecution(execution.executionId, status, execution.exitCode ?? undefined);
       execution.process.stdout?.destroy();
       execution.process.stderr?.destroy();
-    }, STDIO_DRAIN_GRACE_PERIOD_MS);
+    };
+
+    if (delay <= 0) {
+      finalize();
+      return;
+    }
+    execution.drainFallbackId = setTimeout(finalize, delay);
   }
 
   /**

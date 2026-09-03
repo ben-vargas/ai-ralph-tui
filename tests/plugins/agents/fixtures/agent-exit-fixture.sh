@@ -27,6 +27,18 @@ case "$mode" in
       printf '%s\n' "$!" > "$AGENT_CHILD_PID_FILE"
     fi
     ;;
+  continuous)
+    printf '%s\n' 'initial output'
+    (
+      while :; do
+        sleep 0.3
+        printf '%s\n' 'continuous output'
+      done
+    ) &
+    if [ -n "${AGENT_CHILD_PID_FILE:-}" ]; then
+      printf '%s\n' "$!" > "$AGENT_CHILD_PID_FILE"
+    fi
+    ;;
   *)
     printf 'unknown mode: %s\n' "$mode" >&2
     exit 1
