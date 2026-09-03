@@ -197,6 +197,9 @@ export interface RuntimeOptions {
   /** Polling interval in milliseconds when watching */
   pollIntervalMs?: number;
 
+  /** Reset the progress file before starting a new session */
+  resetProgress?: boolean;
+
   /** Working directory for execution */
   cwd?: string;
 

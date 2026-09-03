@@ -75,7 +75,12 @@ import type { RalphConfig } from '../config/types.js';
 import { projectConfigExists, runSetupWizard, checkAndMigrate } from '../setup/index.js';
 import { createInterruptHandler } from '../interruption/index.js';
 import type { InterruptHandler } from '../interruption/types.js';
-import { createStructuredLogger, clearProgress } from '../logs/index.js';
+import {
+  createStructuredLogger,
+  clearProgress,
+  ensureProgressFile,
+  appendProgressSessionMarker,
+} from '../logs/index.js';
 import { createHeadlessEventHandler, type HeadlessEventHandler } from './headless-events.js';
 import { sendCompletionNotification, sendMaxIterationsNotification, sendErrorNotification, resolveNotificationsEnabled } from '../notifications.js';
 import type { NotificationSoundMode } from '../config/types.js';
@@ -1007,6 +1012,10 @@ export function parseRunArgs(args: string[]): ExtendedRuntimeOptions {
         options.watch = true;
         break;
 
+      case '--reset-progress':
+        options.resetProgress = true;
+        break;
+
       case '--poll':
         if (nextArg && !nextArg.startsWith('-')) {
           const parsed = Number(nextArg);
@@ -1230,6 +1239,7 @@ Options:
   --poll <seconds>    Poll interval in seconds (implies --watch, default: 30)
   --cwd <path>        Working directory
   --resume            Resume existing session
+  --reset-progress    Clear .ralph-tui/progress.md instead of preserving it
   --force             Force start even if locked
   --headless          Run without TUI (alias: --no-tui)
   --no-tui            Run without TUI, output structured logs to stdout
@@ -3735,8 +3745,12 @@ export async function executeRunCommand(args: string[]): Promise<void> {
       executionScopes = session.executionScopes ?? executionScopes;
     }
   } else {
-    // Clear progress file for fresh start with new epic
-    await clearProgress(config.cwd);
+    if (options.resetProgress) {
+      await clearProgress(config.cwd);
+    } else {
+      await ensureProgressFile(config.cwd);
+      await appendProgressSessionMarker(config.cwd, newSessionId);
+    }
   }
 
   trackerForRun = trackerForRun ?? await trackerRegistry.getInstance(config.tracker);

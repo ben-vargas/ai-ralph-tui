@@ -13,6 +13,8 @@ import {
   extractCodebasePatterns,
   getCodebasePatternsForPrompt,
   PROGRESS_FILE,
+  ensureProgressFile,
+  appendProgressSessionMarker,
 } from '../../src/logs/progress.js';
 
 describe('progress.ts', () => {
@@ -51,6 +53,43 @@ describe('progress.ts', () => {
       const content = await readProgress(testDir);
       expect(content).toContain('# Ralph Progress Log');
       expect(content).toContain('## Codebase Patterns');
+    });
+
+    test('ensureProgressFile creates the default header when absent', async () => {
+      await ensureProgressFile(testDir);
+
+      const content = await readProgress(testDir);
+      expect(content).toContain('# Ralph Progress Log');
+      expect(content).toContain('## Codebase Patterns');
+    });
+
+    test('ensureProgressFile preserves existing content verbatim', async () => {
+      const existingContent = 'Existing context\nwith trailing whitespace.  \n';
+      await mkdir(join(testDir, '.ralph-tui'), { recursive: true });
+      await writeFile(join(testDir, PROGRESS_FILE), existingContent);
+
+      await ensureProgressFile(testDir);
+
+      expect(await readProgress(testDir)).toBe(existingContent);
+    });
+
+    test('appendProgressSessionMarker preserves content and is not an iteration entry', async () => {
+      const existingContent = `# Ralph Progress Log
+
+## ✓ Iteration 1 - task-1: Existing task
+Completed existing task.
+`;
+      await mkdir(join(testDir, '.ralph-tui'), { recursive: true });
+      await writeFile(join(testDir, PROGRESS_FILE), existingContent);
+
+      await appendProgressSessionMarker(testDir, 'session-123');
+
+      const content = await readProgress(testDir);
+      expect(content.startsWith(existingContent)).toBe(true);
+      expect(content).toContain('## Session session-123 — started ');
+      expect(content.match(/## [✓✗] Iteration \d+/g)).toHaveLength(1);
+      const summary = await getRecentProgressSummary(testDir, 5);
+      expect(summary.match(/## [✓✗] Iteration \d+/g)).toHaveLength(1);
     });
 
     test('getRecentProgressSummary returns last N entries', async () => {

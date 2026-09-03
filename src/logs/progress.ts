@@ -4,7 +4,7 @@
  * agent runs about what's been done.
  */
 
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 
 /**
@@ -64,6 +64,41 @@ export async function clearProgress(cwd: string): Promise<void> {
   try {
     await mkdir(dirPath, { recursive: true });
     await writeFile(filePath, getDefaultProgressHeader(), 'utf-8');
+  } catch {
+    // Ignore errors
+  }
+}
+
+/**
+ * Create the progress file with its default header if it does not exist.
+ */
+export async function ensureProgressFile(cwd: string): Promise<void> {
+  const filePath = join(cwd, PROGRESS_FILE);
+  const dirPath = dirname(filePath);
+
+  try {
+    await mkdir(dirPath, { recursive: true });
+    await writeFile(filePath, getDefaultProgressHeader(), {
+      encoding: 'utf-8',
+      flag: 'wx',
+    });
+  } catch {
+    // Ignore errors
+  }
+}
+
+/**
+ * Append a marker identifying the start of a new session.
+ */
+export async function appendProgressSessionMarker(
+  cwd: string,
+  sessionId: string
+): Promise<void> {
+  const filePath = join(cwd, PROGRESS_FILE);
+  const marker = `\n---\n\n## Session ${sessionId} — started ${new Date().toISOString()}\n\n`;
+
+  try {
+    await appendFile(filePath, marker, 'utf-8');
   } catch {
     // Ignore errors
   }
@@ -140,4 +175,3 @@ export async function getCodebasePatternsForPrompt(cwd: string): Promise<string>
 
   return lines.join('\n');
 }
-
