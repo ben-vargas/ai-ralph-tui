@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { platform } from 'node:os';
 import {
   BaseAgentPlugin,
+  debugLog,
   quoteForWindowsShell,
   STDIO_DRAIN_GRACE_PERIOD_MS,
   STDIO_DRAIN_MAX_WAIT_MS,
@@ -320,7 +321,7 @@ export class DroidAgentPlugin extends BaseAgentPlugin {
           return;
         }
         if (process.env.RALPH_DEBUG) {
-          console.error(
+          debugLog(
             `[DEBUG] Process stdio stayed open after drain: code=${exitCode}, ` +
               `signal=${exitSignal}, execId=${executionId}`
           );

@@ -10,7 +10,7 @@ import { tmpdir, platform } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
 /** Debug log helper - writes to file to avoid TUI interference */
-function debugLog(msg: string): void {
+export function debugLog(msg: string): void {
   // Always log during debugging phase (TODO: restore RALPH_DEBUG check later)
   try {
     const logPath = join(tmpdir(), 'ralph-agent-debug.log');
