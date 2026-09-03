@@ -748,6 +748,14 @@ function isOurLock(cwd: string, lock: LockFile): boolean {
 }
 
 /**
+ * Check whether the current process owns the lock without modifying it.
+ */
+export async function ownsLock(cwd: string): Promise<boolean> {
+  const lock = await readLockFile(cwd);
+  return lock !== null && isOurLock(cwd, lock);
+}
+
+/**
  * Check the current lock status without modifying anything
  */
 export async function checkLock(cwd: string): Promise<LockCheckResult> {

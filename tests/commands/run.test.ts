@@ -202,6 +202,18 @@ describe('run command', () => {
       });
     });
 
+    describe('reset-progress flag', () => {
+      test('parses --reset-progress flag', () => {
+        const result = parseRunArgs(['--reset-progress']);
+        expect(result.resetProgress).toBe(true);
+      });
+
+      test('resetProgress is undefined when not specified', () => {
+        const result = parseRunArgs([]);
+        expect(result.resetProgress).toBeUndefined();
+      });
+    });
+
     describe('force flag', () => {
       test('parses --force flag', () => {
         const result = parseRunArgs(['--force']);
@@ -388,6 +400,7 @@ describe('run command', () => {
       expect(output).toContain('--target-branch');
       expect(output).toContain('--cwd');
       expect(output).toContain('--resume');
+      expect(output).toContain('--reset-progress');
       expect(output).toContain('--force');
       expect(output).toContain('--headless');
       expect(output).toContain('--no-tui');

@@ -8,7 +8,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ExecutionScope } from '../plugins/trackers/types.js';
-import { checkSession, createSession } from './index.js';
+import {
+  acquireLockWithPrompt,
+  checkSession,
+  createSession,
+  releaseLock,
+  resumeSession,
+  saveSession,
+} from './index.js';
 
 let tempDirs: string[] = [];
 
@@ -52,5 +59,51 @@ describe('createSession', () => {
     const checked = await checkSession(cwd);
     expect(checked.session?.epicIds).toEqual(['ui-epic', 'backend-epic']);
     expect(checked.session?.executionScopes).toEqual(executionScopes);
+  });
+});
+
+describe('resumeSession', () => {
+  test('succeeds when the current process already owns the lock', async () => {
+    const cwd = await createTempDir();
+    const session = await createSession({
+      cwd,
+      sessionId: 'session-owned-lock',
+      agentPlugin: 'claude',
+      trackerPlugin: 'beads-rust',
+      maxIterations: 5,
+      totalTasks: 2,
+      lockAlreadyAcquired: true,
+    });
+    session.status = 'paused';
+    await saveSession(session);
+
+    const acquired = await acquireLockWithPrompt(cwd, session.id);
+    expect(acquired.acquired).toBe(true);
+
+    const resumed = await resumeSession(cwd);
+
+    expect(resumed?.status).toBe('running');
+    expect((await checkSession(cwd)).session?.status).toBe('running');
+    await releaseLock(cwd);
+  });
+
+  test('acquires the lock when no lock is held', async () => {
+    const cwd = await createTempDir();
+    const session = await createSession({
+      cwd,
+      sessionId: 'session-unlocked',
+      agentPlugin: 'claude',
+      trackerPlugin: 'beads-rust',
+      maxIterations: 5,
+      totalTasks: 2,
+      lockAlreadyAcquired: true,
+    });
+    session.status = 'paused';
+    await saveSession(session);
+
+    const resumed = await resumeSession(cwd);
+
+    expect(resumed?.status).toBe('running');
+    await releaseLock(cwd);
   });
 });
