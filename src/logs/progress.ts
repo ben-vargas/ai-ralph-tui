@@ -82,8 +82,10 @@ export async function ensureProgressFile(cwd: string): Promise<void> {
       encoding: 'utf-8',
       flag: 'wx',
     });
-  } catch {
-    // Ignore errors
+  } catch (error) {
+    if (!(error instanceof Error) || (error as NodeJS.ErrnoException).code !== 'EEXIST') {
+      throw error;
+    }
   }
 }
 
@@ -97,11 +99,7 @@ export async function appendProgressSessionMarker(
   const filePath = join(cwd, PROGRESS_FILE);
   const marker = `\n---\n\n## Session ${sessionId} — started ${new Date().toISOString()}\n\n`;
 
-  try {
-    await appendFile(filePath, marker, 'utf-8');
-  } catch {
-    // Ignore errors
-  }
+  await appendFile(filePath, marker, 'utf-8');
 }
 
 /**

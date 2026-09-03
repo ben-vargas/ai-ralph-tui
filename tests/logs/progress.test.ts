@@ -73,6 +73,15 @@ describe('progress.ts', () => {
       expect(await readProgress(testDir)).toBe(existingContent);
     });
 
+    test('ensureProgressFile rethrows non-EEXIST errors', async () => {
+      const invalidCwd = join(testDir, 'not-a-directory');
+      await writeFile(invalidCwd, 'not a directory');
+
+      await expect(ensureProgressFile(invalidCwd)).rejects.toMatchObject({
+        code: 'ENOTDIR',
+      });
+    });
+
     test('appendProgressSessionMarker preserves content and is not an iteration entry', async () => {
       const existingContent = `# Ralph Progress Log
 
@@ -90,6 +99,26 @@ Completed existing task.
       expect(content.match(/## [✓✗] Iteration \d+/g)).toHaveLength(1);
       const summary = await getRecentProgressSummary(testDir, 5);
       expect(summary.match(/## [✓✗] Iteration \d+/g)).toHaveLength(1);
+    });
+
+    test('appendProgressSessionMarker rethrows file errors', async () => {
+      const invalidCwd = join(testDir, 'not-a-directory');
+      await writeFile(invalidCwd, 'not a directory');
+
+      await expect(
+        appendProgressSessionMarker(invalidCwd, 'session-123')
+      ).rejects.toMatchObject({ code: 'ENOTDIR' });
+    });
+
+    test('appendProgressSessionMarker records a reset session boundary', async () => {
+      await clearProgress(testDir);
+
+      await appendProgressSessionMarker(testDir, 'session-reset');
+
+      const content = await readProgress(testDir);
+      expect(content).toContain('# Ralph Progress Log');
+      expect(content).toContain('## Session session-reset — started ');
+      expect(content.match(/## [✓✗] Iteration \d+/g)).toBeNull();
     });
 
     test('getRecentProgressSummary returns last N entries', async () => {
