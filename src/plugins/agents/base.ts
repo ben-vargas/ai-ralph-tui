@@ -175,6 +175,9 @@ interface RunningExecution {
   reject: (error: Error) => void;
   timeoutId?: ReturnType<typeof setTimeout>;
   options?: AgentExecuteOptions;
+  drainFallbackId?: ReturnType<typeof setTimeout>;
+  exitCode?: number | null;
+  exitSignal?: NodeJS.Signals | null;
 }
 
 /**
@@ -200,6 +203,9 @@ const MAX_EXECUTION_STREAM_CHARS = 2_000_000;
  * Prefix added when stream output is truncated in memory.
  */
 const STREAM_TRUNCATED_PREFIX = '[...agent output truncated in memory...]\n';
+
+// Balances capturing late descendant output against delaying completed agents.
+const STDIO_DRAIN_GRACE_PERIOD_MS = 2000;
 
 /**
  * Append chunk data while enforcing an in-memory size cap.
@@ -713,6 +719,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
           MAX_EXECUTION_STREAM_CHARS
         );
         options?.onStdout?.(text);
+        if (execution.drainFallbackId !== undefined) {
+          this.scheduleDrainFallback(execution);
+        }
       });
 
       // Handle stderr
@@ -724,6 +733,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
           MAX_EXECUTION_STREAM_CHARS
         );
         options?.onStderr?.(text);
+        if (execution.drainFallbackId !== undefined) {
+          this.scheduleDrainFallback(execution);
+        }
       });
 
       // Handle process error
@@ -738,18 +750,8 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
           debugLog(`[DEBUG] Process close: code=${code}, signal=${signal}, execId=${executionId}`);
         }
 
-        // Determine status
-        let status: AgentExecutionStatus;
-        if (execution.interrupted) {
-          status = 'interrupted';
-        } else if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-          status = execution.timeoutId ? 'timeout' : 'interrupted';
-        } else if (code === 0) {
-          status = 'completed';
-        } else {
-          status = 'failed';
-        }
-
+        this.clearDrainFallback(execution);
+        const status = this.deriveExitStatus(execution, code, signal);
         this.completeExecution(executionId, status, code ?? undefined);
       });
 
@@ -758,8 +760,9 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
         if (process.env.RALPH_DEBUG) {
           debugLog(`[DEBUG] Process exit: code=${code}, signal=${signal}, execId=${executionId}`);
         }
-        // Note: We don't call completeExecution here to avoid double-completion
-        // 'close' should fire after 'exit' once stdio streams are closed
+        execution.exitCode = code;
+        execution.exitSignal = signal;
+        this.scheduleDrainFallback(execution);
       });
 
       // Set up timeout if specified
@@ -895,6 +898,53 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     };
   }
 
+  private deriveExitStatus(
+    execution: RunningExecution,
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): AgentExecutionStatus {
+    if (execution.interrupted) {
+      return 'interrupted';
+    }
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      return execution.timeoutId ? 'timeout' : 'interrupted';
+    }
+    return code === 0 ? 'completed' : 'failed';
+  }
+
+  private clearDrainFallback(execution: RunningExecution): void {
+    if (execution.drainFallbackId !== undefined) {
+      clearTimeout(execution.drainFallbackId);
+      execution.drainFallbackId = undefined;
+    }
+  }
+
+  private scheduleDrainFallback(execution: RunningExecution): void {
+    this.clearDrainFallback(execution);
+    execution.drainFallbackId = setTimeout(() => {
+      execution.drainFallbackId = undefined;
+      if (!this.executions.has(execution.executionId)) {
+        return;
+      }
+
+      const status = this.deriveExitStatus(
+        execution,
+        execution.exitCode ?? null,
+        execution.exitSignal ?? null
+      );
+      this.completeExecution(execution.executionId, status, execution.exitCode ?? undefined);
+
+      if (process.env.RALPH_DEBUG) {
+        debugLog(
+          `[DEBUG] Process stdio stayed open after drain: code=${execution.exitCode}, ` +
+            `signal=${execution.exitSignal}, execId=${execution.executionId}`
+        );
+      }
+      execution.process.stdout?.destroy();
+      execution.process.stderr?.destroy();
+    }, STDIO_DRAIN_GRACE_PERIOD_MS);
+  }
+
   /**
    * Complete an execution and resolve its promise.
    */
@@ -920,6 +970,7 @@ export abstract class BaseAgentPlugin implements AgentPlugin {
     if (execution.timeoutId) {
       clearTimeout(execution.timeoutId);
     }
+    this.clearDrainFallback(execution);
 
     const endedAt = new Date();
     const durationMs = endedAt.getTime() - execution.startedAt.getTime();
