@@ -23,6 +23,7 @@ import {
   acquireLockWithPrompt,
   acquireLockExclusive,
   acquireLockExclusiveResult,
+  ownsLock,
   registerLockCleanupHandlers,
   releaseLock,
   releaseLockSync,
@@ -342,6 +343,29 @@ describe('releaseLockSync', () => {
 });
 
 describe('lock identity and guard protocol', () => {
+  test('reports ownership for a lock held by the current process', async () => {
+    const cwd = await createTempDir();
+    const acquired = await acquireLockWithPrompt(cwd, 'owns-lock');
+
+    expect(acquired.acquired).toBe(true);
+    expect(await ownsLock(cwd)).toBe(true);
+
+    await releaseLock(cwd);
+  });
+
+  test('reports false when the lock file is absent', async () => {
+    const cwd = await createTempDir();
+
+    expect(await ownsLock(cwd)).toBe(false);
+  });
+
+  test('reports false for a foreign lock identity', async () => {
+    const cwd = await createTempDir();
+    await writeLock(cwd, process.pid + 1, 'foreign-lock-id');
+
+    expect(await ownsLock(cwd)).toBe(false);
+  });
+
   test('async and sync release remove a lock with the current lock identity', async () => {
     const asyncCwd = await createTempDir();
     const asyncAcquired = await acquireLockWithPrompt(asyncCwd, 'async-release');
