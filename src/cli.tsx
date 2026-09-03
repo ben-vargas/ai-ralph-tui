@@ -81,6 +81,7 @@ Run Options:
   --tracker <name>    Override tracker plugin (e.g., beads, beads-bv, json)
   --iterations <n>    Maximum iterations (0 = unlimited)
   --resume            Resume existing session (deprecated, use 'resume' command)
+  --reset-progress    Clear .ralph-tui/progress.md instead of preserving it
   --headless          Run without TUI (alias: --no-tui)
   --no-tui            Run without TUI, output structured logs to stdout
   --no-setup          Skip interactive setup even if no config exists
