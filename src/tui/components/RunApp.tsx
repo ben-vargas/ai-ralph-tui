@@ -2183,7 +2183,7 @@ export function RunApp({
     (key: KeyEvent) => {
       // Handle clipboard copy:
       // - macOS: Cmd+C (meta key)
-      // - Linux: Ctrl+Shift+C or Alt+C
+      // - Linux: Alt+C (Ctrl+Shift+C where the terminal reports Shift)
       // - Windows: Ctrl+C
       // Note: We check this early so copy works even when dialogs are open
       const selection = renderer.getSelection();
@@ -2464,7 +2464,7 @@ export function RunApp({
 
         // Note: 'c' / Ctrl+C is intentionally NOT handled here.
         // Ctrl+C and Ctrl+Shift+C send the same sequence (\x03) in most terminals,
-        // so we can't distinguish between "stop" and "copy". Users should use 'q' to quit.
+        // so use Alt+C to copy; Ctrl+C opens the interrupt dialog and q quits.
 
 
         case 'v':
