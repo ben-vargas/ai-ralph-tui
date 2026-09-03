@@ -22,6 +22,7 @@ import { writeJsonAtomic } from './atomic-write.js';
 import {
   acquireLockExclusive,
   cleanStaleLock as cleanStaleLockWithGuard,
+  ownsLock,
   releaseLock as releaseLockWithGuard,
 } from './lock.js';
 
@@ -305,13 +306,15 @@ export async function resumeSession(
     return null;
   }
 
-  // Clean up stale lock if present
-  await cleanStaleLockWithGuard(cwd);
+  if (!(await ownsLock(cwd))) {
+    // Clean up stale lock if present
+    await cleanStaleLockWithGuard(cwd);
 
-  // Acquire new lock
-  const acquired = await acquireLockExclusive(cwd, session.id);
-  if (!acquired) {
-    return null;
+    // Acquire new lock
+    const acquired = await acquireLockExclusive(cwd, session.id);
+    if (!acquired) {
+      return null;
+    }
   }
 
   // Update status to running
@@ -367,6 +370,7 @@ export {
   acquireLockWithPrompt,
   acquireLockExclusiveResult,
   acquireLockExclusive as acquireLock,
+  ownsLock,
   cleanStaleLock,
   releaseLock,
   releaseLock as releaseLockNew,
